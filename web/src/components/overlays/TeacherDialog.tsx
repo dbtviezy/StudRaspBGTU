@@ -17,9 +17,10 @@ import {
 import { maskIf } from "@/lib/profanity";
 import { nextTeacherLessons, splitTeachers, teacherHeading, teacherWhere } from "@/lib/schedule";
 import { actions } from "@/lib/store";
+import { reviewBlock, useAccount } from "@/lib/account";
 import { useShell } from "../context";
 import { Icon } from "../Icons";
-import { Overlay, Sheet, StarPicker, Stars } from "../ui";
+import { Alert, Overlay, Sheet, StarPicker, Stars } from "../ui";
 import ReportDialog from "./Report";
 
 const MAX_TEXT = 300;
@@ -33,9 +34,38 @@ function errorText(s: Copy, error: unknown): string {
     case "rate_limited": return s.rateLimited;
     case "text_too_long": return s.textTooLong;
     case "unknown_teacher": return s.unknownTeacher;
-    case "banned": return s.banned;
+    case "banned":
+    case "restricted":
+    case "social_required":
+    case "account_too_new":
+    case "device_used":
+    case "own_review":
+    case "unauthorized": return s.failureText(error);
     default: return s.ratingFailed;
   }
+}
+
+/** Runs `action` only when signed in; otherwise explains why an account is needed and offers to sign in. */
+function useAccountGate(): [(action: () => void) => void, React.ReactNode] {
+  const { s, signIn } = useShell();
+  const { user } = useAccount();
+  const [asking, setAsking] = useState(false);
+  const gate = (action: () => void) => (user ? action() : setAsking(true));
+  const alert = asking ? (
+    <Alert title={s.needAccountTitle} text={s.needAccountText} onClose={() => setAsking(false)}>
+      <button className="tbtn muted" onClick={() => setAsking(false)}>{s.cancel}</button>
+      <button
+        className="tbtn"
+        onClick={() => {
+          setAsking(false);
+          signIn();
+        }}
+      >
+        {s.signIn}
+      </button>
+    </Alert>
+  ) : null;
+  return [gate, alert];
 }
 
 function shortDate(s: Copy, iso: string): string {
@@ -95,6 +125,7 @@ function ReviewCard({ review, s, title, own }: { review: Review; s: Copy; title?
   const { toast, data } = useShell();
   const [votes, setVotes] = useState({ likes: review.likes ?? 0, dislikes: review.dislikes ?? 0, myVote: review.myVote ?? 0 });
   const [reporting, setReporting] = useState(false);
+  const [gate, gateAlert] = useAccountGate();
 
   const vote = async (value: number) => {
     const next = votes.myVote === value ? 0 : value;
@@ -108,7 +139,7 @@ function ReviewCard({ review, s, title, own }: { review: Review; s: Copy; title?
       setVotes(await voteReview(review.id, next));
     } catch (e) {
       setVotes(previous);
-      toast(s.errorText(e instanceof RatingError ? e.code : ""));
+      toast(s.failureText(e));
     }
   };
 
@@ -134,10 +165,10 @@ function ReviewCard({ review, s, title, own }: { review: Review; s: Copy; title?
             </span>
           ) : (
             <>
-              <VoteButton on={votes.myVote === 1} icon="thumbUp" count={votes.likes} label={s.like} onClick={() => vote(1)} />
-              <VoteButton on={votes.myVote === -1} icon="thumbDown" count={votes.dislikes} label={s.dislike} onClick={() => vote(-1)} />
+              <VoteButton on={votes.myVote === 1} icon="thumbUp" count={votes.likes} label={s.like} onClick={() => gate(() => vote(1))} />
+              <VoteButton on={votes.myVote === -1} icon="thumbDown" count={votes.dislikes} label={s.dislike} onClick={() => gate(() => vote(-1))} />
               <span className="grow" />
-              <button className="icon-btn muted" aria-label={s.report} title={s.report} onClick={() => setReporting(true)}>
+              <button className="icon-btn muted" aria-label={s.report} title={s.report} onClick={() => gate(() => setReporting(true))}>
                 <Icon name="flag" size={18} />
               </button>
             </>
@@ -145,6 +176,7 @@ function ReviewCard({ review, s, title, own }: { review: Review; s: Copy; title?
         </div>
       )}
       {reporting && <ReportDialog onSend={(reason) => reportReview(review.id, reason)} onClose={() => setReporting(false)} />}
+      {gateAlert}
     </div>
   );
 }
@@ -237,12 +269,25 @@ function RatingSheet({ teacher, mine, onClose, onDone }: { teacher: string; mine
 
 function RatingCard({ name, showName }: { name: string; showName: boolean }) {
   const { s } = useShell();
+  const { user } = useAccount();
   const summaries = useSummaries();
   const [ratings, setRatings] = useState<TeacherRatings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rating, setRating] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [blocked, setBlocked] = useState<string | null>(null);
+  const [gate, gateAlert] = useAccountGate();
   const load = useCallback(() => setAttempt((n) => n + 1), []);
+  const userId = user?.id ?? null;
+
+  const startRating = () =>
+    gate(() => {
+      const block = reviewBlock(user);
+      if (block === "social") return setBlocked(s.socialRequired);
+      if (block && typeof block === "object") return setBlocked(s.accountTooNew(block.until));
+      setBlocked(null);
+      setRating(true);
+    });
 
   useEffect(() => {
     let alive = true;
@@ -256,10 +301,13 @@ function RatingCard({ name, showName }: { name: string; showName: boolean }) {
     return () => {
       alive = false;
     };
-  }, [name, attempt, s]);
+  }, [name, attempt, s, userId]);
 
   const summary = ratings?.summary ?? summaries.get(name) ?? null;
   const mine = ratings?.mine ?? null;
+  const mineNote = mine?.claimable
+    ? mine.hidden ? s.mineHiddenUnclaimed : s.legacyMine(ratings?.legacyUntil ?? null)
+    : null;
   const others = (ratings?.reviews ?? []).filter((r) => !(mine && r.id === mine.id));
 
   return (
@@ -288,11 +336,13 @@ function RatingCard({ name, showName }: { name: string; showName: boolean }) {
             <button className="tbtn flush" onClick={load}>{s.retry}</button>
           </div>
         ) : (
-          <button className="btn compact mt12" disabled={!ratings} onClick={() => setRating(true)}>
+          <button className="btn compact mt12" disabled={!ratings} onClick={startRating}>
             {mine ? s.editReview : s.rateTeacher}
           </button>
         )}
+        {blocked && <div className="red small mt8">{blocked}</div>}
         {mine && <ReviewCard key={`mine-${mine.updatedAt}`} review={mine} s={s} title={s.yourReview} own />}
+        {mineNote && <div className="red xsmall mt4">{mineNote}</div>}
         {ratings && (
           <>
             <h3 className="h3 mt16">{s.reviews}</h3>
@@ -314,6 +364,7 @@ function RatingCard({ name, showName }: { name: string; showName: boolean }) {
           }}
         />
       )}
+      {gateAlert}
     </>
   );
 }

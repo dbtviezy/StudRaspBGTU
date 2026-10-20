@@ -18,5 +18,5 @@ export const POST = handle(async (request: Request) => {
   const userId = await redeemAuthCode(body.code);
   const rows = await sql()`SELECT * FROM users WHERE id = ${userId}::uuid`;
   if (!rows.length) throw new ApiError(400, "invalid_code");
-  return sessionResponse(rows[0]);
+  return sessionResponse(rows[0], request);
 });

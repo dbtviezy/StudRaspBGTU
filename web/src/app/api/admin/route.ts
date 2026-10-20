@@ -1,6 +1,7 @@
-import { ApiError, cleanText, ensureSchema, sql } from "@/lib/server/db";
+import { ApiError, BAN_SCOPES, cleanText, ensureSchema, sql, type BanScope } from "@/lib/server/db";
 import { requireAdmin } from "@/lib/server/auth";
 import { handle, json, preflight, readBody } from "@/lib/server/http";
+import { syncClassRep, toRepRequest } from "@/lib/server/reps";
 import { chatModerationEnabled, supabaseAdmin, supabaseCount } from "@/lib/server/supabase";
 
 export const runtime = "nodejs";
@@ -49,7 +50,8 @@ async function stats() {
     (SELECT count(*) FROM review_votes)::int AS votes,
     (SELECT count(DISTINCT kind || target) FROM reports WHERE NOT resolved)::int AS open_reports,
     (SELECT count(*) FROM bans WHERE until IS NULL OR until > now())::int AS active_bans,
-    (SELECT count(*) FROM announcements WHERE active AND (until IS NULL OR until > now()))::int AS announcements`;
+    (SELECT count(*) FROM announcements WHERE active AND (until IS NULL OR until > now()))::int AS announcements,
+    (SELECT count(*) FROM rep_requests WHERE status = 'pending')::int AS pending_reps`;
   const [chats, messages] = await Promise.all([supabaseCount("chats?select=id"), supabaseCount("messages?select=id")]);
   return {
     users: row.users,
@@ -62,6 +64,7 @@ async function stats() {
     openReports: row.open_reports,
     activeBans: row.active_bans,
     announcements: row.announcements,
+    pendingReps: row.pending_reps,
     chats,
     messages,
     chatEnabled: chatModerationEnabled(),
@@ -116,35 +119,105 @@ async function messages() {
   const rows = await supabaseAdmin<Row[]>(
     "messages?select=id,chat_id,user_id,author,body,created_at,chats(kind,title,group_id)&order=id.desc&limit=100",
   );
-  return (rows ?? []).map((row) => {
-    const chat = (row.chats ?? {}) as Row;
-    return {
-      id: Number(row.id),
-      chatId: String(row.chat_id),
-      userId: String(row.user_id),
-      author: String(row.author),
-      body: String(row.body),
-      createdAt: iso(row.created_at),
-      chat: chat.kind === "dm" ? "dm" : String(chat.title || chat.group_id || ""),
-    };
-  });
+  return (rows ?? []).map(toMessage);
 }
+
+function toMessage(row: Row) {
+  const chat = (row.chats ?? {}) as Row;
+  return {
+    id: Number(row.id),
+    chatId: String(row.chat_id),
+    userId: String(row.user_id),
+    author: String(row.author),
+    body: String(row.body),
+    createdAt: iso(row.created_at),
+    chat: chat.kind === "dm" ? "dm" : String(chat.title || chat.group_id || ""),
+  };
+}
+
+const toBan = (row: Row) => ({
+  id: Number(row.id),
+  userId: row.user_id ? String(row.user_id) : null,
+  device: Boolean(row.device),
+  name: row.name ? String(row.name) : null,
+  login: row.login ? String(row.login) : null,
+  scope: String(row.scope ?? "all"),
+  reason: String(row.reason),
+  createdAt: iso(row.created_at),
+  until: iso(row.until),
+  active: row.until == null || new Date(row.until as string) > new Date(),
+});
 
 async function bans() {
   const rows = await sql()`
-    SELECT b.id, b.user_id, b.device_hash IS NOT NULL AS device, b.reason, b.created_at, b.until, u.name, u.login
+    SELECT b.id, b.user_id, b.device_hash IS NOT NULL AS device, b.scope, b.reason, b.created_at, b.until, u.name, u.login
     FROM bans b LEFT JOIN users u ON u.id = b.user_id
     WHERE b.until IS NULL OR b.until > now()
     ORDER BY b.created_at DESC LIMIT 200`;
+  return rows.map(toBan);
+}
+
+/** Everything about one person for the moderator's card. */
+async function person(url: URL) {
+  const id = uuidOf(url.searchParams.get("id"));
+  const q = sql();
+  const [users, reviewRows, reportRows, banRows, sessionRows, repRows] = await Promise.all([
+    q`SELECT * FROM users WHERE id = ${id}::uuid`,
+    q`SELECT r.id, r.teacher, r.overall, r.text, r.hidden, r.updated_at,
+        (SELECT count(*) FROM reports p WHERE p.kind = 'review' AND p.target = r.id::text)::int AS reports
+      FROM teacher_reviews r WHERE r.user_id = ${id}::uuid ORDER BY r.updated_at DESC LIMIT 100`,
+    q`SELECT count(*)::int AS sent FROM reports WHERE user_id = ${id}::uuid`,
+    q`SELECT b.id, b.user_id, b.device_hash IS NOT NULL AS device, b.scope, b.reason, b.created_at, b.until
+      FROM bans b WHERE b.user_id = ${id}::uuid ORDER BY b.created_at DESC LIMIT 100`,
+    q`SELECT count(*)::int AS n FROM sessions WHERE user_id = ${id}::uuid AND expires_at > now()`,
+    q`SELECT * FROM rep_requests WHERE user_id = ${id}::uuid ORDER BY created_at DESC LIMIT 1`,
+  ]);
+  if (!users.length) throw new ApiError(404, "not_found");
+  const user = users[0];
+  let chatMessages: ReturnType<typeof toMessage>[] = [];
+  if (chatModerationEnabled()) {
+    const rows = await supabaseAdmin<Row[]>(
+      `messages?user_id=eq.${id}&select=id,chat_id,user_id,author,body,created_at,chats(kind,title,group_id)&order=id.desc&limit=30`,
+    );
+    chatMessages = (rows ?? []).map(toMessage);
+  }
+  return {
+    user: {
+      id: String(user.id),
+      name: String(user.name),
+      login: user.login ? String(user.login) : null,
+      telegram: user.telegram_id != null,
+      google: user.google_sub != null,
+      createdAt: iso(user.created_at),
+      seenAt: iso(user.seen_at),
+    },
+    devices: Number(sessionRows[0]?.n ?? 0),
+    reportsSent: Number(reportRows[0]?.sent ?? 0),
+    reviews: reviewRows.map((row) => ({
+      id: Number(row.id),
+      teacher: String(row.teacher),
+      overall: Number(row.overall),
+      text: String(row.text),
+      hidden: Boolean(row.hidden),
+      updatedAt: iso(row.updated_at),
+      reports: Number(row.reports),
+    })),
+    messages: chatMessages,
+    bans: banRows.map(toBan),
+    rep: repRows.length ? toRepRequest(repRows[0]) : null,
+  };
+}
+
+async function reps() {
+  const rows = await sql()`
+    SELECT r.*, u.name, u.login FROM rep_requests r JOIN users u ON u.id = r.user_id
+    WHERE r.status IN ('pending', 'approved')
+    ORDER BY (r.status = 'pending') DESC, r.created_at DESC LIMIT 200`;
   return rows.map((row) => ({
-    id: Number(row.id),
-    userId: row.user_id ? String(row.user_id) : null,
-    device: Boolean(row.device),
-    name: row.name ? String(row.name) : null,
+    ...toRepRequest(row),
+    userId: String(row.user_id),
+    name: String(row.name),
     login: row.login ? String(row.login) : null,
-    reason: String(row.reason),
-    createdAt: iso(row.created_at),
-    until: iso(row.until),
   }));
 }
 
@@ -165,7 +238,9 @@ async function users(url: URL) {
   const rows = await sql()`
     SELECT u.id, u.name, u.login, u.telegram_id IS NOT NULL AS telegram, u.google_sub IS NOT NULL AS google,
       u.created_at, u.seen_at,
-      EXISTS (SELECT 1 FROM bans b WHERE b.user_id = u.id AND (b.until IS NULL OR b.until > now())) AS banned
+      EXISTS (SELECT 1 FROM bans b WHERE b.user_id = u.id AND b.scope = 'all' AND (b.until IS NULL OR b.until > now())) AS banned,
+      EXISTS (SELECT 1 FROM bans b WHERE b.user_id = u.id AND b.scope <> 'all' AND (b.until IS NULL OR b.until > now())) AS restricted,
+      EXISTS (SELECT 1 FROM rep_requests r WHERE r.user_id = u.id AND r.status = 'approved') AS rep
     FROM users u
     WHERE ${query}::text = '' OR u.name ILIKE ${pattern} OR u.login ILIKE ${pattern} OR u.id::text LIKE ${`${query.toLowerCase()}%`}
     ORDER BY u.seen_at DESC LIMIT 100`;
@@ -178,6 +253,8 @@ async function users(url: URL) {
     createdAt: iso(row.created_at),
     seenAt: iso(row.seen_at),
     banned: Boolean(row.banned),
+    restricted: Boolean(row.restricted),
+    rep: Boolean(row.rep),
   }));
 }
 
@@ -207,6 +284,8 @@ export const GET = handle(async (request: Request) => {
     case "bans": return json({ items: await bans() });
     case "announcements": return json({ items: await announcements() });
     case "users": return json({ items: await users(url) });
+    case "user": return json(await person(url));
+    case "reps": return json({ items: await reps() });
     default: throw new ApiError(400, "bad_request");
   }
 });
@@ -215,18 +294,38 @@ async function deleteMessage(id: number) {
   await supabaseAdmin(`messages?id=eq.${id}`, { method: "DELETE" });
 }
 
-async function banUser(userId: string, days: number | null, reason: string) {
-  const q = sql();
-  await q`INSERT INTO bans (user_id, reason, until)
-    VALUES (${userId}::uuid, ${reason}, ${days == null ? null : new Date(Date.now() + days * 86400_000).toISOString()}::timestamptz)`;
-  await q`DELETE FROM sessions WHERE user_id = ${userId}::uuid`;
-  if (chatModerationEnabled()) {
-    await supabaseAdmin("chat_bans?on_conflict=user_id", {
+function scopeOf(value: unknown): BanScope {
+  if (value == null) return "all";
+  if (typeof value !== "string" || !(BAN_SCOPES as readonly string[]).includes(value)) throw new ApiError(400, "bad_request");
+  return value as BanScope;
+}
+
+const untilOf = (days: number | null) => (days == null ? null : new Date(Date.now() + days * 86400_000).toISOString());
+
+/** Rewrites the user's rows in Supabase chat_bans from the active chat-related bans here. */
+async function syncChatBans(userId: string) {
+  if (!chatModerationEnabled()) return;
+  const rows = await sql()`
+    SELECT DISTINCT ON (scope) scope, until, reason FROM bans
+    WHERE user_id = ${userId}::uuid AND scope IN ('all', 'chat', 'chat_create') AND (until IS NULL OR until > now())
+    ORDER BY scope, until DESC NULLS FIRST`;
+  await supabaseAdmin(`chat_bans?user_id=eq.${userId}`, { method: "DELETE" });
+  if (rows.length) {
+    await supabaseAdmin("chat_bans", {
       method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify({ user_id: userId, reason, until: days == null ? null : new Date(Date.now() + days * 86400_000).toISOString() }),
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(rows.map((row) => ({ user_id: userId, scope: row.scope, until: iso(row.until), reason: row.reason }))),
     });
   }
+}
+
+/** A full ban (`all`) also signs the person out everywhere. */
+async function banUser(userId: string, days: number | null, reason: string, scope: BanScope, device: string | null = null) {
+  const q = sql();
+  await q`INSERT INTO bans (user_id, device_hash, scope, reason, until)
+    VALUES (${userId}::uuid, ${device}, ${scope}, ${reason}, ${untilOf(days)}::timestamptz)`;
+  if (scope === "all") await q`DELETE FROM sessions WHERE user_id = ${userId}::uuid`;
+  await syncChatBans(userId);
 }
 
 async function resolveReports(kind: string, target: string) {
@@ -273,32 +372,61 @@ export const POST = handle(async (request: Request) => {
     }
     case "ban.review": {
       const id = idOf(body.id);
-      const rows = await q`SELECT device_hash FROM teacher_reviews WHERE id = ${id}`;
+      const rows = await q`SELECT device_hash, user_id FROM teacher_reviews WHERE id = ${id}`;
       if (!rows.length) throw new ApiError(404, "not_found");
       const days = daysOf(body.days);
-      await q`INSERT INTO bans (device_hash, reason, until)
-        VALUES (${String(rows[0].device_hash)}, ${cleanText(body.reason, 200)},
-          ${days == null ? null : new Date(Date.now() + days * 86400_000).toISOString()}::timestamptz)`;
-      if (body.hideAll === true) await q`UPDATE teacher_reviews SET hidden = true WHERE device_hash = ${String(rows[0].device_hash)}`;
+      const scope = scopeOf(body.scope);
+      const reason = cleanText(body.reason, 200);
+      const device = String(rows[0].device_hash);
+      if (rows[0].user_id) {
+        await banUser(String(rows[0].user_id), days, reason, scope, device);
+      } else {
+        await q`INSERT INTO bans (device_hash, scope, reason, until) VALUES (${device}, ${scope}, ${reason}, ${untilOf(days)}::timestamptz)`;
+      }
+      if (body.hideAll === true) {
+        if (rows[0].user_id) await q`UPDATE teacher_reviews SET hidden = true WHERE user_id = ${String(rows[0].user_id)}::uuid`;
+        await q`UPDATE teacher_reviews SET hidden = true WHERE device_hash = ${device}`;
+      }
       break;
     }
     case "ban.user": {
-      await banUser(uuidOf(body.userId), daysOf(body.days), cleanText(body.reason, 200));
+      await banUser(uuidOf(body.userId), daysOf(body.days), cleanText(body.reason, 200), scopeOf(body.scope));
       break;
     }
     case "ban.message": {
       const id = idOf(body.id);
       const rows = await supabaseAdmin<{ user_id: string }[]>(`messages?id=eq.${id}&select=user_id`);
       if (!rows?.length) throw new ApiError(404, "not_found");
-      await banUser(rows[0].user_id, daysOf(body.days), cleanText(body.reason, 200));
+      await banUser(rows[0].user_id, daysOf(body.days), cleanText(body.reason, 200), scopeOf(body.scope));
       if (body.deleteMessage === true) await deleteMessage(id);
       break;
     }
     case "ban.remove": {
       const id = idOf(body.id);
       const rows = await q`DELETE FROM bans WHERE id = ${id} RETURNING user_id`;
-      const userId = rows[0]?.user_id ? String(rows[0].user_id) : null;
-      if (userId && chatModerationEnabled()) await supabaseAdmin(`chat_bans?user_id=eq.${userId}`, { method: "DELETE" });
+      if (rows[0]?.user_id) await syncChatBans(String(rows[0].user_id));
+      break;
+    }
+    case "rep.approve": {
+      const id = idOf(body.id);
+      const rows = await q`UPDATE rep_requests SET status = 'approved', decided_at = now()
+        WHERE id = ${id} AND status = 'pending' RETURNING user_id, group_id`;
+      if (!rows.length) throw new ApiError(404, "not_found");
+      const userId = String(rows[0].user_id);
+      await q`UPDATE rep_requests SET status = 'revoked', decided_at = now()
+        WHERE user_id = ${userId}::uuid AND status = 'approved' AND id <> ${id}`;
+      const [user] = await q`SELECT name FROM users WHERE id = ${userId}::uuid`;
+      await syncClassRep(userId, String(rows[0].group_id), String(user?.name ?? ""));
+      break;
+    }
+    case "rep.reject": {
+      await q`UPDATE rep_requests SET status = 'rejected', decided_at = now() WHERE id = ${idOf(body.id)} AND status = 'pending'`;
+      break;
+    }
+    case "rep.revoke": {
+      const rows = await q`UPDATE rep_requests SET status = 'revoked', decided_at = now()
+        WHERE id = ${idOf(body.id)} AND status = 'approved' RETURNING user_id`;
+      if (rows.length) await syncClassRep(String(rows[0].user_id), null);
       break;
     }
     case "announce.create": {
@@ -320,6 +448,9 @@ export const POST = handle(async (request: Request) => {
     default:
       throw new ApiError(400, "bad_request");
   }
-  await log(action, body.id ?? body.target ?? body.userId, body.reason ?? body.text);
+  const detail = action.startsWith("ban.") && action !== "ban.remove"
+    ? `[${String(body.scope ?? "all")}] ${String(body.reason ?? "")}`
+    : body.reason ?? body.text;
+  await log(action, body.id ?? body.target ?? body.userId, detail);
   return json({ ok: true });
 });

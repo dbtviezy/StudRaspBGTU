@@ -1487,6 +1487,45 @@ input[type="range"] {
   opacity: 0.5;
 }
 
+.choice-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--bg);
+  color: var(--ink);
+  text-align: left;
+}
+
+.badge-rep {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.warn {
+  color: var(--amber);
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
 .or-line {
   display: flex;
   align-items: center;

@@ -29,7 +29,7 @@ import { useShell } from "../context";
 import { Icon } from "../Icons";
 import { Sheet } from "../ui";
 
-const errorOf = (s: Copy, e: unknown) => s.errorText(e instanceof Error ? e.message : "");
+const errorOf = (s: Copy, e: unknown) => s.failureText(e);
 
 export function PinnedBar({ chat, onUnpin }: { chat: ChatInfo; onUnpin: (() => void) | null }) {
   const { s, data } = useShell();
@@ -65,13 +65,13 @@ export function MembersSheet({ chat, onClose }: { chat: ChatInfo; onClose: () =>
 
   useEffect(() => {
     let alive = true;
-    fetchMembers(chat.id)
+    fetchMembers(chat.id, chat.groupId)
       .then((list) => alive && setMembers(list))
       .catch((e) => alive && setError(errorOf(s, e)));
     return () => {
       alive = false;
     };
-  }, [chat.id, attempt, s]);
+  }, [chat.id, chat.groupId, attempt, s]);
 
   const change = (member: Member, role: "helper" | "member") => {
     setMemberRole(chat.id, member.userId, role)
@@ -88,7 +88,10 @@ export function MembersSheet({ chat, onClose }: { chat: ChatInfo; onClose: () =>
         <div key={member.userId} className="row mt12" style={{ gap: 10 }}>
           <span className="avatar" style={{ width: 36, height: 36, fontSize: 14 }}>{member.name[0]?.toUpperCase()}</span>
           <div className="grow">
-            <div className="semibold small">{member.userId === user?.id ? `${member.name} (${s.you})` : member.name}</div>
+            <div className="semibold small">
+              {member.userId === user?.id ? `${member.name} (${s.you})` : member.name}
+              {member.rep && <span className="badge-rep">{s.roleRep}</span>}
+            </div>
             {member.role !== "member" && <div className="blue xsmall">{member.role === "owner" ? s.roleOwner : s.roleHelper}</div>}
           </div>
           {owner && member.role === "member" && (

@@ -43,6 +43,21 @@ create table if not exists public.chat_bans (
   until   timestamptz,
   reason  text not null default ''
 );
+-- v1.2: one row per restriction: 'all' (full ban), 'chat' (can't write), 'chat_create' (can't start chats or DMs).
+-- Filled by our server (/api/admin) from the bans in Neon.
+alter table public.chat_bans add column if not exists scope text not null default 'all';
+alter table public.chat_bans drop constraint if exists chat_bans_pkey;
+alter table public.chat_bans add primary key (user_id, scope);
+
+-- Class reps confirmed by the moderators; they get helper rights in every chat of their group.
+create table if not exists public.class_reps (
+  user_id  uuid primary key,
+  group_id text not null,
+  name     text not null default ''
+);
+alter table public.class_reps enable row level security;
+drop policy if exists class_reps_read on public.class_reps;
+create policy class_reps_read on public.class_reps for select to authenticated using (true);
 
 create or replace function public.my_name() returns text
 language sql stable as $$
@@ -56,7 +71,15 @@ $$;
 
 create or replace function public.is_banned() returns boolean
 language sql stable security definer set search_path = public as $$
-  select exists (select 1 from chat_bans where user_id = auth.uid() and (until is null or until > now()))
+  select exists (select 1 from chat_bans where user_id = auth.uid() and scope = 'all' and (until is null or until > now()))
+$$;
+
+create or replace function public.is_restricted(p_scope text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from chat_bans
+    where user_id = auth.uid() and scope in ('all', p_scope) and (until is null or until > now())
+  )
 $$;
 
 alter table public.chats enable row level security;
@@ -78,7 +101,7 @@ create policy messages_read on public.messages for select to authenticated
 
 drop policy if exists messages_write on public.messages;
 create policy messages_write on public.messages for insert to authenticated
-  with check (user_id = auth.uid() and public.is_member(chat_id) and not public.is_banned());
+  with check (user_id = auth.uid() and public.is_member(chat_id) and not public.is_restricted('chat'));
 
 drop policy if exists messages_delete_own on public.messages;
 create policy messages_delete_own on public.messages for delete to authenticated
@@ -88,6 +111,7 @@ create policy messages_delete_own on public.messages for delete to authenticated
 create or replace function public.messages_before_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
+  if public.is_restricted('chat') then raise exception 'muted' using errcode = 'P0001'; end if;
   new.user_id := auth.uid();
   new.author := public.my_name();
   new.created_at := now();
@@ -113,6 +137,7 @@ declare
   chat chats;
 begin
   if auth.uid() is null or public.is_banned() then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if public.is_restricted('chat_create') then raise exception 'no_create' using errcode = 'P0001'; end if;
   if (select count(*) from chats where created_by = auth.uid() and created_at > now() - interval '1 day') >= 5 then
     raise exception 'rate_limited' using errcode = 'P0001';
   end if;
@@ -162,6 +187,7 @@ begin
       and exists (select 1 from chat_members b where b.chat_id = c.id and b.user_id = p_peer)
     limit 1;
   if chat.id is not null then return chat; end if;
+  if public.is_restricted('chat_create') then raise exception 'no_create' using errcode = 'P0001'; end if;
   if (select count(*) from chats where created_by = auth.uid() and kind = 'dm' and created_at > now() - interval '1 day') >= 20 then
     raise exception 'rate_limited' using errcode = 'P0001';
   end if;
@@ -192,7 +218,7 @@ language sql security definer set search_path = public as $$
   where chat_id = p_chat and user_id = auth.uid()
 $$;
 
--- v1.2: the chat creator (role 'owner', shown as the class rep) can make members helpers.
+-- v1.2: the chat creator (role 'owner') can make members helpers.
 alter table public.chat_members drop constraint if exists chat_members_role_check;
 alter table public.chat_members add constraint chat_members_role_check check (role in ('owner', 'helper', 'member'));
 
@@ -205,7 +231,9 @@ create or replace function public.is_staff(c uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from chat_members m join chats ch on ch.id = m.chat_id
-    where m.chat_id = c and m.user_id = auth.uid() and m.accepted and m.role in ('owner', 'helper') and ch.kind = 'group'
+    where m.chat_id = c and m.user_id = auth.uid() and m.accepted and ch.kind = 'group'
+      and (m.role in ('owner', 'helper')
+        or exists (select 1 from class_reps r where r.user_id = m.user_id and r.group_id = ch.group_id))
   )
 $$;
 
@@ -265,7 +293,8 @@ declare
   opts text[];
   new_id bigint;
 begin
-  if not public.is_staff(p_chat) or public.is_banned() then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if not public.is_staff(p_chat) then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if public.is_restricted('chat') then raise exception 'muted' using errcode = 'P0001'; end if;
   select array_agg(left(btrim(o), 100) order by n) into opts
     from unnest(p_options) with ordinality as t(o, n) where btrim(coalesce(o, '')) <> '';
   if btrim(coalesce(p_question, '')) = '' or coalesce(array_length(opts, 1), 0) not between 2 and 8 then
@@ -288,7 +317,8 @@ declare
   picked int[] := coalesce(p_choices, '{}');
 begin
   select * into p from polls where id = p_poll;
-  if p.id is null or not public.is_member(p.chat_id) or public.is_banned() or p.closed then
+  if public.is_restricted('chat') then raise exception 'muted' using errcode = 'P0001'; end if;
+  if p.id is null or not public.is_member(p.chat_id) or p.closed then
     raise exception 'forbidden' using errcode = 'P0001';
   end if;
   if (not p.multiple and coalesce(array_length(picked, 1), 0) > 1)
@@ -353,7 +383,8 @@ language plpgsql security definer set search_path = public as $$
 declare
   new_id bigint;
 begin
-  if not public.is_staff(p_chat) or public.is_banned() then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if not public.is_staff(p_chat) then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if public.is_restricted('chat') then raise exception 'muted' using errcode = 'P0001'; end if;
   if btrim(coalesce(p_title, '')) = '' or (p_due_time is not null and p_due_time !~ '^\d{2}:\d{2}$') then
     raise exception 'bad_request' using errcode = 'P0001';
   end if;
@@ -382,7 +413,7 @@ create or replace function public.my_chats()
 returns table (
   id uuid, kind text, title text, group_id text, invite_code text, role text, accepted boolean,
   peer_name text, last_id bigint, last_body text, last_author text, last_at timestamptz, unread int,
-  pinned_body text, pinned_author text, pinned_at timestamptz
+  pinned_body text, pinned_author text, pinned_at timestamptz, rep boolean
 )
 language sql stable security definer set search_path = public as $$
   select c.id, c.kind, c.title, c.group_id,
@@ -391,7 +422,8 @@ language sql stable security definer set search_path = public as $$
     (select p.name from chat_members p where p.chat_id = c.id and p.user_id <> auth.uid() limit 1),
     l.id, l.body, l.author, l.created_at,
     (select count(*)::int from messages u where u.chat_id = c.id and u.id > me.last_read and u.user_id <> auth.uid()),
-    c.pinned_body, c.pinned_author, c.pinned_at
+    c.pinned_body, c.pinned_author, c.pinned_at,
+    c.kind = 'group' and exists (select 1 from class_reps r where r.user_id = auth.uid() and r.group_id = c.group_id)
   from chat_members me
   join chats c on c.id = me.chat_id
   left join lateral (select * from messages m where m.chat_id = c.id order by m.id desc limit 1) l on true

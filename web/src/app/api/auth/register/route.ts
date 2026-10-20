@@ -23,5 +23,5 @@ export const POST = handle(async (request: Request) => {
     INSERT INTO users (login, password_hash, name) VALUES (${login}, ${await hashPassword(password)}, ${name})
     ON CONFLICT (login) DO NOTHING RETURNING *`;
   if (!rows.length) throw new ApiError(409, "login_taken");
-  return sessionResponse(rows[0]);
+  return sessionResponse(rows[0], request);
 });

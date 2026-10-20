@@ -3,7 +3,7 @@ import { ApiError } from "./db";
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Device-Id, Authorization, X-Admin-Token",
+  "Access-Control-Allow-Headers": "Content-Type, X-Device-Id, X-Device-Name, Authorization, X-Admin-Token",
   "Access-Control-Max-Age": "86400",
 };
 
@@ -19,7 +19,7 @@ export function preflight(): Response {
 }
 
 export function fail(error: unknown): Response {
-  if (error instanceof ApiError) return json({ error: error.code }, error.status);
+  if (error instanceof ApiError) return json({ ...error.extra, error: error.code }, error.status);
   console.error("api error", error);
   return json({ error: "server_error" }, 500);
 }

@@ -15,5 +15,5 @@ export const POST = handle(async (request: Request) => {
   const body = await readBody(request);
   const profile = await verifyGoogle(body.credential);
   await ensureSchema();
-  return providerSignIn("google", profile.sub, profile.name, await userFromRequest(request));
+  return providerSignIn("google", profile.sub, profile.name, await userFromRequest(request), request);
 });

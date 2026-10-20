@@ -21,17 +21,22 @@ export interface ChatInfo {
   unread: number;
   pinnedBody: string | null;
   pinnedAuthor: string | null;
+  /** I am the confirmed class rep of this group chat's group. */
+  rep?: boolean;
 }
 
 export type Role = "owner" | "helper" | "member";
 
-/** The class rep (chat creator) and their helpers can pin, run polls and post group tasks. */
-export const isStaff = (chat: ChatInfo) => chat.kind === "group" && chat.accepted && (chat.role === "owner" || chat.role === "helper");
+/** The chat creator, helpers and the confirmed class rep can pin, run polls and post group tasks. */
+export const isStaff = (chat: ChatInfo) =>
+  chat.kind === "group" && chat.accepted && (chat.role === "owner" || chat.role === "helper" || chat.rep === true);
 
 export interface Member {
   userId: string;
   name: string;
   role: Role;
+  /** Confirmed class rep of the chat's group. */
+  rep: boolean;
 }
 
 export interface Poll {
@@ -156,7 +161,7 @@ function errorCode(status: number, body: string): string {
   try {
     const parsed = JSON.parse(body) as { message?: string };
     const message = parsed.message ?? "";
-    for (const code of ["rate_limited", "invalid_code", "forbidden", "bad_request"]) if (message.includes(code)) return code;
+    for (const code of ["rate_limited", "invalid_code", "muted", "no_create", "forbidden", "bad_request"]) if (message.includes(code)) return code;
   } catch {}
   if (status === 401 || status === 403) return "forbidden";
   return status >= 500 ? "server_error" : "bad_request";
@@ -207,6 +212,7 @@ function toChat(row: Record<string, unknown>): ChatInfo {
     unread: Number(row.unread ?? 0),
     pinnedBody: row.pinned_body ? String(row.pinned_body) : null,
     pinnedAuthor: row.pinned_author ? String(row.pinned_author) : null,
+    rep: row.rep === true,
   };
 }
 
@@ -364,9 +370,29 @@ export async function pinMessage(chatId: string, messageId: number | null) {
   await refreshChats();
 }
 
-export async function fetchMembers(chatId: string): Promise<Member[]> {
-  const rows = await rest<Record<string, unknown>[]>(`chat_members?chat_id=eq.${chatId}&accepted=eq.true&select=user_id,name,role&order=joined_at.asc`);
-  return (rows ?? []).map((row) => ({ userId: String(row.user_id), name: String(row.name), role: roleOf(row.role) }));
+const reps = new Map<string, Set<string>>();
+
+/** User ids of the confirmed class reps of a group (cached for the session). */
+export async function fetchReps(groupId: string): Promise<Set<string>> {
+  const cached = reps.get(groupId);
+  if (cached) return cached;
+  const rows = await rest<Record<string, unknown>[]>(`class_reps?group_id=eq.${encodeURIComponent(groupId)}&select=user_id`);
+  const ids = new Set((rows ?? []).map((row) => String(row.user_id)));
+  reps.set(groupId, ids);
+  return ids;
+}
+
+export async function fetchMembers(chatId: string, groupId: string | null = null): Promise<Member[]> {
+  const [rows, repIds] = await Promise.all([
+    rest<Record<string, unknown>[]>(`chat_members?chat_id=eq.${chatId}&accepted=eq.true&select=user_id,name,role&order=joined_at.asc`),
+    groupId ? fetchReps(groupId).catch(() => new Set<string>()) : Promise.resolve(new Set<string>()),
+  ]);
+  return (rows ?? []).map((row) => ({
+    userId: String(row.user_id),
+    name: String(row.name),
+    role: roleOf(row.role),
+    rep: repIds.has(String(row.user_id)),
+  }));
 }
 
 export async function setMemberRole(chatId: string, userId: string, role: "helper" | "member") {

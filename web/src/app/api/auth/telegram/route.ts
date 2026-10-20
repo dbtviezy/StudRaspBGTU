@@ -14,5 +14,5 @@ export function OPTIONS() {
 export const POST = handle(async (request: Request) => {
   const profile = verifyTelegram(await readBody(request));
   await ensureSchema();
-  return providerSignIn("telegram", String(profile.id), profile.name, await userFromRequest(request));
+  return providerSignIn("telegram", String(profile.id), profile.name, await userFromRequest(request), request);
 });

@@ -1,4 +1,4 @@
-import { ApiError, assertNotBanned, checkRateLimit, cleanText, deviceHash, ensureSchema, sql, validDeviceId } from "@/lib/server/db";
+import { ApiError, assertAllowed, checkRateLimit, cleanText, deviceHash, ensureSchema, sql, validDeviceId } from "@/lib/server/db";
 import { requireUser } from "@/lib/server/auth";
 import { handle, json, preflight, readBody } from "@/lib/server/http";
 import { chatModerationEnabled, supabaseAdmin } from "@/lib/server/supabase";
@@ -12,7 +12,7 @@ export function OPTIONS() {
 
 /**
  * Body: `{ deviceId, kind: "review", target: reviewId, reason }` or
- * `{ deviceId, kind: "message", target: messageId, reason }` (message reports need a signed-in user).
+ * `{ deviceId, kind: "message", target: messageId, reason }`. Both need a signed-in user.
  */
 export const POST = handle(async (request: Request) => {
   const body = await readBody(request);
@@ -22,8 +22,10 @@ export const POST = handle(async (request: Request) => {
   if ((kind !== "review" && kind !== "message") || !Number.isSafeInteger(target) || target <= 0) throw new ApiError(400, "bad_request");
   const reason = cleanText(body.reason, 200);
   const hash = deviceHash(body.deviceId);
+  const user = await requireUser(request);
+  const userId = String(user.id);
   await ensureSchema();
-  await assertNotBanned(hash);
+  await assertAllowed("reports", hash, userId);
   await checkRateLimit(`report:${hash}`, 20);
   let snapshot = "";
   if (kind === "review") {
@@ -31,7 +33,6 @@ export const POST = handle(async (request: Request) => {
     if (!rows.length) throw new ApiError(404, "not_found");
     snapshot = `${rows[0].teacher}: ${rows[0].text}`.slice(0, 1000);
   } else {
-    await requireUser(request);
     if (chatModerationEnabled()) {
       const rows = await supabaseAdmin<{ author: string; body: string }[]>(`messages?id=eq.${target}&select=author,body`);
       if (!rows?.length) throw new ApiError(404, "not_found");
@@ -39,7 +40,9 @@ export const POST = handle(async (request: Request) => {
     }
   }
   await sql()`
-    INSERT INTO reports (kind, target, snapshot, reason, device_hash) VALUES (${kind}, ${String(target)}, ${snapshot}, ${reason}, ${hash})
-    ON CONFLICT (kind, target, device_hash) DO UPDATE SET reason = EXCLUDED.reason, resolved = false, created_at = now()`;
+    INSERT INTO reports (kind, target, snapshot, reason, device_hash, user_id)
+    VALUES (${kind}, ${String(target)}, ${snapshot}, ${reason}, ${hash}, ${userId}::uuid)
+    ON CONFLICT (kind, target, device_hash) DO UPDATE SET reason = EXCLUDED.reason, user_id = EXCLUDED.user_id,
+      resolved = false, created_at = now()`;
   return json({ ok: true });
 });

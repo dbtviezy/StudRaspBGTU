@@ -1,16 +1,19 @@
 import {
   ApiError,
-  assertNotBanned,
+  assertAllowed,
+  assertCanReview,
   checkRateLimit,
   cleanText,
   deviceHash,
   ensureSchema,
+  hideUnclaimedReviews,
   isKnownTeacher,
   sql,
   teacherSummary,
   toSummary,
   validDeviceId,
 } from "@/lib/server/db";
+import { requireUser } from "@/lib/server/auth";
 import { fail, json, preflight, readBody } from "@/lib/server/http";
 
 export const runtime = "nodejs";
@@ -25,6 +28,7 @@ export function OPTIONS() {
 export async function GET() {
   try {
     await ensureSchema();
+    await hideUnclaimedReviews();
     const rows = await sql()`
       SELECT teacher, count(*)::int AS count,
         round(avg(overall), 1)::float8 AS overall,
@@ -51,6 +55,10 @@ function deviceOf(body: Record<string, unknown>): string {
   return body.deviceId;
 }
 
+/**
+ * One review per account and per device for each teacher. An old device-only review on this device is taken over
+ * by the account; a review left from this device by another account blocks a new one (`device_used`).
+ */
 export async function POST(request: Request) {
   try {
     const body = await readBody(request);
@@ -65,20 +73,31 @@ export async function POST(request: Request) {
     const text = cleanText(body.text, 300);
     const teacher = teacherOf(body);
     const hash = deviceHash(deviceId);
-    await ensureSchema();
-    await assertNotBanned(hash);
+    const user = await requireUser(request);
+    const userId = String(user.id);
+    assertCanReview(user);
+    await assertAllowed("reviews", hash, userId);
     await checkRateLimit(hash);
     const [overall, delivery, strictness, loyalty] = scores;
-    await sql()`
-      INSERT INTO teacher_reviews (teacher, device_hash, overall, delivery, strictness, loyalty, text)
-      VALUES (${teacher}, ${hash}, ${overall}, ${delivery}, ${strictness}, ${loyalty}, ${text})
-      ON CONFLICT (teacher, device_hash) DO UPDATE SET
-        overall = EXCLUDED.overall,
-        delivery = EXCLUDED.delivery,
-        strictness = EXCLUDED.strictness,
-        loyalty = EXCLUDED.loyalty,
-        text = EXCLUDED.text,
-        updated_at = now()`;
+    const q = sql();
+    const own = await q`SELECT id FROM teacher_reviews WHERE teacher = ${teacher} AND user_id = ${userId}::uuid`;
+    let id = own.length ? Number(own[0].id) : null;
+    if (id == null) {
+      const byDevice = await q`SELECT id, user_id FROM teacher_reviews WHERE teacher = ${teacher} AND device_hash = ${hash}`;
+      if (byDevice.length && byDevice[0].user_id != null) throw new ApiError(409, "device_used");
+      id = byDevice.length ? Number(byDevice[0].id) : null;
+    }
+    if (id == null) {
+      await q`
+        INSERT INTO teacher_reviews (teacher, device_hash, user_id, overall, delivery, strictness, loyalty, text)
+        VALUES (${teacher}, ${hash}, ${userId}::uuid, ${overall}, ${delivery}, ${strictness}, ${loyalty}, ${text})`;
+    } else {
+      await q`
+        UPDATE teacher_reviews SET user_id = ${userId}::uuid, overall = ${overall}, delivery = ${delivery},
+          strictness = ${strictness}, loyalty = ${loyalty}, text = ${text}, updated_at = now(),
+          hidden = hidden AND NOT unclaimed, unclaimed = false, kept = false
+        WHERE id = ${id}`;
+    }
     return json({ ok: true, summary: await teacherSummary(teacher) });
   } catch (error) {
     return fail(error);
@@ -91,9 +110,10 @@ export async function DELETE(request: Request) {
     const deviceId = deviceOf(body);
     const teacher = teacherOf(body);
     const hash = deviceHash(deviceId);
-    await ensureSchema();
+    const user = await requireUser(request);
     await checkRateLimit(hash);
-    await sql()`DELETE FROM teacher_reviews WHERE teacher = ${teacher} AND device_hash = ${hash}`;
+    await sql()`DELETE FROM teacher_reviews WHERE teacher = ${teacher}
+      AND (user_id = ${String(user.id)}::uuid OR (user_id IS NULL AND NOT kept AND device_hash = ${hash}))`;
     return json({ ok: true, summary: await teacherSummary(teacher) });
   } catch (error) {
     return fail(error);

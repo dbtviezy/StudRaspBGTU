@@ -1,7 +1,9 @@
-import { ApiError, ensureSchema, sql } from "@/lib/server/db";
+import { activeRestrictions, ApiError, ensureSchema, sql } from "@/lib/server/db";
 import { cleanLogin, cleanName, cleanPassword, endSession, hashPassword, requireUser, verifyPassword } from "@/lib/server/auth";
 import { userJson } from "@/lib/server/accounts";
 import { handle, json, preflight, readBody } from "@/lib/server/http";
+import { latestRepRequest } from "@/lib/server/reps";
+import { chatModerationEnabled, supabaseAdmin } from "@/lib/server/supabase";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +12,13 @@ export function OPTIONS() {
   return preflight();
 }
 
-export const GET = handle(async (request: Request) => json(userJson(await requireUser(request))));
+/** `{ user, restrictions, rep }`: active per-action restrictions and the latest class rep request. */
+export const GET = handle(async (request: Request) => {
+  const user = await requireUser(request);
+  const id = String(user.id);
+  const [restrictions, rep] = await Promise.all([activeRestrictions(null, id), latestRepRequest(id)]);
+  return json({ ...userJson(user), restrictions, rep });
+});
 
 /**
  * Body (all optional): `name`; `login` + `password` to add a password to a Telegram/Google account;
@@ -56,13 +64,29 @@ export const PATCH = handle(async (request: Request) => {
 /** Same as PATCH: Android's HttpURLConnection cannot send PATCH requests. */
 export const POST = PATCH;
 
-/** Signs out this device. With `{ everywhere: true }` ends all sessions; with `{ deleteAccount: true }` removes the account. */
+/**
+ * Signs out this device. With `{ everywhere: true }` ends all sessions; with `{ deleteAccount: true }` removes the
+ * account and everything tied to it, except reviews when `keepReviews: true` (they stay, anonymous).
+ */
 export const DELETE = handle(async (request: Request) => {
   const user = await requireUser(request);
   const body = await readBody(request).catch(() => ({}) as Record<string, unknown>);
   await ensureSchema();
+  const id = String(user.id);
   if (body.deleteAccount === true) {
-    await sql()`DELETE FROM users WHERE id = ${String(user.id)}::uuid`;
+    const q = sql();
+    if (body.keepReviews === true) {
+      await q`UPDATE teacher_reviews SET user_id = NULL, kept = true, unclaimed = false WHERE user_id = ${id}::uuid`;
+    }
+    await q`DELETE FROM users WHERE id = ${id}::uuid`;
+    if (chatModerationEnabled()) {
+      await Promise.all([
+        supabaseAdmin(`messages?user_id=eq.${id}`, { method: "DELETE" }),
+        supabaseAdmin(`chat_members?user_id=eq.${id}`, { method: "DELETE" }),
+        supabaseAdmin(`class_reps?user_id=eq.${id}`, { method: "DELETE" }),
+        supabaseAdmin(`chat_bans?user_id=eq.${id}`, { method: "DELETE" }),
+      ]).catch(() => undefined);
+    }
   } else if (body.everywhere === true) {
     await sql()`DELETE FROM sessions WHERE user_id = ${String(user.id)}::uuid`;
   } else {

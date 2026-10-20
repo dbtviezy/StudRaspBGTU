@@ -22,6 +22,7 @@ import ChatScreen from "./screens/Chat";
 import { forgetAccount, useAccount, useAccountRefresh } from "@/lib/account";
 import { cachedChats, clearChatCache, useChatVersion, useOutboxPump } from "@/lib/chat";
 import { disablePush } from "@/lib/push";
+import { forgetSync } from "@/lib/sync";
 import LessonDialog from "./overlays/LessonDialog";
 import TeacherDialog from "./overlays/TeacherDialog";
 import TasksOverlay, { TodoEditor } from "./overlays/Tasks";
@@ -29,6 +30,8 @@ import FilesOverlay from "./overlays/Files";
 import NotesOverlay from "./overlays/Notes";
 import InstallHint from "./InstallHint";
 import WhatsNew from "./overlays/WhatsNew";
+import { LoginOffer, SyncQuestion, useAccountSync } from "./overlays/AccountNotices";
+import { SignInSheet } from "./overlays/Account";
 
 function useServiceWorker() {
   useEffect(() => {
@@ -153,6 +156,7 @@ export default function App() {
       pickFriend={() => setPickingFriend(true)}
       onReset={() => {
         disablePush();
+        forgetSync();
         resetData();
         forgetAccount();
         clearChatCache();
@@ -197,10 +201,12 @@ function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend,
   const [files, setFiles] = useState(false);
   const [reminders, setReminders] = useState(false);
   const [todo, setTodo] = useState<TodoPreset | null>(null);
+  const [signing, setSigning] = useState(false);
   const [toastText, toast] = useToast();
   const selectedDate = pickedDate ?? today;
   const { user } = useAccount();
   useAccountRefresh();
+  useAccountSync();
   useOutboxPump(user != null);
   useChatVersion();
   const unread = user != null && cachedChats().some((chat) => chat.unread > 0 || !chat.accepted);
@@ -247,6 +253,7 @@ function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend,
     pickGroup,
     pickFriend,
     onReset,
+    signIn: () => setSigning(true),
   };
 
   const screens = [HomeScreen, ScheduleScreen, GroupsScreen, CalendarScreen, ChatScreen, ProfileScreen];
@@ -280,6 +287,9 @@ function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend,
       {todo && <TodoEditor preset={todo} onClose={() => setTodo(null)} />}
       <InstallHint s={s} />
       {data.seenVersion !== APP_VERSION && <WhatsNew s={s} onClose={() => setState({ seenVersion: APP_VERSION })} />}
+      {data.seenVersion === APP_VERSION && !user && !data.loginOffered && <LoginOffer s={s} onSignIn={() => setSigning(true)} />}
+      {signing && <SignInSheet onClose={() => setSigning(false)} />}
+      <SyncQuestion s={s} />
       {toastText && <div className="toast" role="status">{toastText}</div>}
     </ShellContext.Provider>
   );

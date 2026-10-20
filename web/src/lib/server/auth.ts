@@ -11,6 +11,7 @@ export interface PublicUser {
   login: string | null;
   telegram: boolean;
   google: boolean;
+  createdAt: string;
 }
 
 type Row = Record<string, unknown>;
@@ -22,6 +23,7 @@ export function publicUser(row: Row): PublicUser {
     login: row.login ? String(row.login) : null,
     telegram: row.telegram_id != null,
     google: row.google_sub != null,
+    createdAt: new Date(row.created_at as string).toISOString(),
   };
 }
 
@@ -65,11 +67,24 @@ export function cleanName(value: unknown): string {
   return name;
 }
 
-export async function createSession(userId: string): Promise<string> {
+/** "Android · Pixel 7" from the app's X-Device-Name header, otherwise a guess from the browser's user agent. */
+export function deviceLabel(request: Request | null): string {
+  if (!request) return "";
+  const named = (request.headers.get("x-device-name") ?? "").replace(/[\u0000-\u001f]/g, "").trim();
+  if (named) return named.slice(0, 80);
+  const agent = request.headers.get("user-agent") ?? "";
+  const system = /iPhone|iPad/.test(agent) ? "iPhone" : /Android/.test(agent) ? "Android"
+    : /Windows/.test(agent) ? "Windows" : /Mac OS/.test(agent) ? "Mac" : /Linux/.test(agent) ? "Linux" : "";
+  const browser = /YaBrowser/.test(agent) ? "Яндекс Браузер" : /Edg\//.test(agent) ? "Edge" : /OPR\//.test(agent) ? "Opera"
+    : /Firefox\//.test(agent) ? "Firefox" : /Chrome\//.test(agent) ? "Chrome" : /Safari\//.test(agent) ? "Safari" : "";
+  return [browser, system].filter(Boolean).join(" · ").slice(0, 80);
+}
+
+export async function createSession(userId: string, device = ""): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   const q = sql();
-  await q`INSERT INTO sessions (token_hash, user_id, expires_at)
-    VALUES (${sha256(token)}, ${userId}::uuid, now() + make_interval(days => ${SESSION_DAYS}))`;
+  await q`INSERT INTO sessions (token_hash, user_id, expires_at, device)
+    VALUES (${sha256(token)}, ${userId}::uuid, now() + make_interval(days => ${SESSION_DAYS}), ${device})`;
   if (Math.random() < 0.05) await q`DELETE FROM sessions WHERE expires_at < now()`;
   return token;
 }
@@ -80,14 +95,25 @@ function bearer(request: Request): string | null {
   return match ? match[1] : null;
 }
 
+/** sha256 of this request's session token, to mark the current device in the session list. */
+export function sessionHash(request: Request): string | null {
+  const token = bearer(request);
+  return token ? sha256(token) : null;
+}
+
 export async function userFromRequest(request: Request): Promise<Row | null> {
   const token = bearer(request);
   if (!token) return null;
   await ensureSchema();
   const rows = await sql()`
+    WITH s AS (
+      UPDATE sessions SET used_at = now()
+      WHERE token_hash = ${sha256(token)} AND expires_at > now()
+      RETURNING user_id
+    )
     UPDATE users SET seen_at = now()
-    FROM sessions s
-    WHERE s.token_hash = ${sha256(token)} AND s.expires_at > now() AND users.id = s.user_id
+    FROM s
+    WHERE users.id = s.user_id
     RETURNING users.*`;
   return rows[0] ?? null;
 }

@@ -9,6 +9,22 @@ export interface User {
   login: string | null;
   telegram: boolean;
   google: boolean;
+  createdAt?: string;
+}
+
+export interface Restriction {
+  scope: string;
+  until: string | null;
+  reason: string;
+}
+
+export interface RepRequest {
+  id: number;
+  groupId: string;
+  groupName: string;
+  comment: string;
+  status: "pending" | "approved" | "rejected" | "revoked";
+  createdAt: string;
 }
 
 export interface AuthConfig {
@@ -19,7 +35,7 @@ export interface AuthConfig {
 }
 
 export class ApiFailure extends Error {
-  constructor(public code: string) {
+  constructor(public code: string, public extra: Record<string, unknown> = {}) {
     super(code);
   }
 }
@@ -30,6 +46,9 @@ const USER_KEY = `${PREFIX}account`;
 interface AccountState {
   token: string | null;
   user: User | null;
+  /** Filled by refreshAccount(); not stored. */
+  restrictions?: Restriction[];
+  rep?: RepRequest | null;
 }
 
 let state: AccountState = { token: null, user: null };
@@ -93,7 +112,10 @@ export async function api<T>(path: string, init: RequestInit = {}, auth = true):
   }
   const body = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
   if (response.status === 401 && auth && token && path !== "/api/auth/login") publish(EMPTY);
-  if (!response.ok || !body) throw new ApiFailure(body?.error ?? (response.status >= 500 ? "server_error" : "bad_request"));
+  if (!response.ok || !body) {
+    const { error, ...extra } = (body ?? {}) as Record<string, unknown>;
+    throw new ApiFailure(typeof error === "string" ? error : response.status >= 500 ? "server_error" : "bad_request", extra);
+  }
   return body;
 }
 
@@ -109,8 +131,17 @@ export function authConfig(): Promise<AuthConfig> {
 
 type Session = { token: string; user: User };
 
-function signedIn(result: Session | { user: User }) {
-  publish({ token: "token" in result ? result.token : getAccount().token, user: result.user });
+type MeResult = { user: User; restrictions?: Restriction[]; rep?: RepRequest | null };
+
+function signedIn(result: Session | MeResult) {
+  const current = getAccount();
+  const sameUser = current.user?.id === result.user.id;
+  publish({
+    token: "token" in result ? result.token : current.token,
+    user: result.user,
+    restrictions: "restrictions" in result ? result.restrictions : sameUser ? current.restrictions : undefined,
+    rep: "rep" in result ? result.rep : sameUser ? current.rep : undefined,
+  });
 }
 
 export async function register(login: string, password: string, name: string) {
@@ -137,11 +168,66 @@ export async function updateAccount(patch: Record<string, unknown>) {
 export async function refreshAccount() {
   if (!getAccount().token) return;
   try {
-    signedIn(await api<{ user: User }>("/api/auth/me"));
+    signedIn(await api<MeResult>("/api/auth/me"));
   } catch {}
 }
 
-export async function signOut(options: { everywhere?: boolean; deleteAccount?: boolean } = {}) {
+/** null when the account may review, otherwise the reason it can't yet. */
+export function reviewBlock(user: User | null): null | "account" | "social" | { until: string } {
+  if (!user) return "account";
+  if (!user.telegram && !user.google) return "social";
+  if (user.createdAt) {
+    const ready = Date.parse(user.createdAt) + 86400_000;
+    if (ready > Date.now()) return { until: new Date(ready).toISOString() };
+  }
+  return null;
+}
+
+export interface DeviceSession {
+  id: number;
+  device: string;
+  createdAt: string;
+  usedAt: string;
+  current: boolean;
+}
+
+export async function fetchSessions(): Promise<DeviceSession[]> {
+  return (await api<{ items: DeviceSession[] }>("/api/auth/sessions")).items;
+}
+
+export async function endSessionById(id: number): Promise<void> {
+  await api("/api/auth/sessions", { method: "DELETE", body: JSON.stringify({ id }) });
+}
+
+function setRep(rep: RepRequest | null) {
+  publish({ ...getAccount(), rep });
+}
+
+export async function requestRep(groupId: string, groupName: string, comment: string): Promise<void> {
+  const body = JSON.stringify({ groupId, groupName, comment });
+  setRep((await api<{ rep: RepRequest | null }>("/api/reps", { method: "POST", body })).rep);
+}
+
+export async function cancelRep(): Promise<void> {
+  setRep((await api<{ rep: RepRequest | null }>("/api/reps", { method: "DELETE" })).rep);
+}
+
+export interface MyReview {
+  id: number;
+  teacher: string;
+  overall: number;
+  text: string;
+  updatedAt: string;
+  hidden: boolean;
+  likes: number;
+  dislikes: number;
+}
+
+export async function fetchMyReviews(): Promise<MyReview[]> {
+  return (await api<{ items: MyReview[] }>("/api/ratings/mine")).items;
+}
+
+export async function signOut(options: { everywhere?: boolean; deleteAccount?: boolean; keepReviews?: boolean } = {}) {
   try {
     await api("/api/auth/me", { method: "DELETE", body: JSON.stringify(options) });
   } catch (error) {

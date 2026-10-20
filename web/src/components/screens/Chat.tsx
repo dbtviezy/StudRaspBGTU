@@ -29,6 +29,7 @@ import {
   subscribeChat,
   useChatVersion,
   useOnline,
+  fetchReps,
 } from "@/lib/chat";
 import type { Copy } from "@/lib/i18n";
 import { maskIf } from "@/lib/profanity";
@@ -39,7 +40,7 @@ import { GroupTasksSheet, MembersSheet, PinnedBar, PollsSheet } from "../overlay
 import ReportDialog from "../overlays/Report";
 import { Alert, Centered, Chip, Dialog, useLongPress } from "../ui";
 
-const errorOf = (s: Copy, e: unknown) => s.errorText(e instanceof Error ? e.message : "");
+const errorOf = (s: Copy, e: unknown) => s.failureText(e);
 
 export function chatTitle(s: Copy, chat: ChatInfo): string {
   if (chat.kind === "dm") return chat.peerName ?? s.directChat;
@@ -170,14 +171,19 @@ function InviteDialog({ chat, onClose }: { chat: ChatInfo; onClose: () => void }
   );
 }
 
-function MessageBubble({ message, mine, showAuthor, onMenu }: { message: Message; mine: boolean; showAuthor: boolean; onMenu: () => void }) {
+function MessageBubble({ message, mine, showAuthor, rep, onMenu }: { message: Message; mine: boolean; showAuthor: boolean; rep: boolean; onMenu: () => void }) {
   const { s, data } = useShell();
   const press = useLongPress(onMenu, () => message.status !== "sent" && onMenu());
   const meta = message.status === "pending" ? s.pendingMessage : message.status === "failed" ? s.failedMessage : timeOf(message.createdAt);
   return (
     <div className={`bubble-row${mine ? " mine" : ""}`}>
       <div className={`bubble ${message.status}`} {...press}>
-        {showAuthor && !mine && <div className="who">{message.author}</div>}
+        {showAuthor && !mine && (
+          <div className="who">
+            {message.author}
+            {rep && <span className="badge-rep">{s.roleRep}</span>}
+          </div>
+        )}
         {mine ? message.body : maskIf(data.hideProfanity, message.body)}
         <div className="meta">
           {message.status === "pending" && <Icon name="schedule" size={11} />} {meta}
@@ -208,6 +214,18 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
   const staff = isStaff(live);
   const group = live.kind === "group";
   const pin = (id: number | null) => pinMessage(chat.id, id).catch((e) => toast(errorOf(s, e)));
+  const [reps, setReps] = useState<Set<string>>(() => new Set());
+  const { restrictions } = useAccount();
+  const muted = (restrictions ?? []).find((r) => r.scope === "chat" || r.scope === "all");
+
+  useEffect(() => {
+    if (!live.groupId || live.kind !== "group") return;
+    let alive = true;
+    fetchReps(live.groupId).then((ids) => alive && setReps(ids)).catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [live.groupId, live.kind]);
 
   useEffect(() => {
     let alive = true;
@@ -265,6 +283,7 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
       </div>
       {group && <PinnedBar chat={live} onUnpin={staff ? () => pin(null) : null} />}
       {!online && <div className="offline-bar">{s.offlineBanner}</div>}
+      {muted && <div className="offline-bar">{s.restrictionText(muted.scope, muted.until, muted.reason)}</div>}
       <div className="chat-log" ref={log}>
         <div className="inner">
           {messages.length === 0 && <div className="muted small" style={{ textAlign: "center", marginTop: 24 }}>{s.noMessages}</div>}
@@ -275,7 +294,7 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
             return (
               <div key={message.clientId || message.id}>
                 {separator}
-                <MessageBubble message={message} mine={message.userId === user?.id || message.id == null} showAuthor={live.kind === "group"} onMenu={() => setMenu(message)} />
+                <MessageBubble message={message} mine={message.userId === user?.id || message.id == null} showAuthor={live.kind === "group"} rep={reps.has(message.userId)} onMenu={() => setMenu(message)} />
               </div>
             );
           })}

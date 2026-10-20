@@ -42,6 +42,8 @@ export interface Data {
   chatPush: boolean;
   /** Last app version whose "What's new" screen was shown. */
   seenVersion: string | null;
+  /** The one-time "sign in" suggestion was shown. */
+  loginOffered: boolean;
 }
 
 const DEFAULTS: Data = {
@@ -64,6 +66,7 @@ const DEFAULTS: Data = {
   hideProfanity: false,
   chatPush: false,
   seenVersion: null,
+  loginOffered: false,
 };
 
 export const PREFIX = "studrasp.";
@@ -110,6 +113,14 @@ export function setState(patch: Partial<Data> | ((d: Data) => Partial<Data>)) {
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Runs `listener` after every data change; returns the unsubscribe function. */
+export function onDataChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function useStore(): Data {

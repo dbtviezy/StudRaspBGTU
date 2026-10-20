@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import teachers from "@/data/teachers.json";
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string) {
+  constructor(public status: number, public code: string, public extra: Record<string, unknown> = {}) {
     super(code);
   }
 }
@@ -117,6 +117,40 @@ export function ensureSchema(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now()
     )`;
     await q`CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id)`;
+    // v1.2: reviews, votes and reports belong to accounts; `kept` marks reviews left anonymous on account deletion,
+    // `unclaimed` marks old device-only reviews hidden after LEGACY_REVIEWS_UNTIL.
+    await q`ALTER TABLE teacher_reviews ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users (id) ON DELETE CASCADE`;
+    await q`ALTER TABLE teacher_reviews ADD COLUMN IF NOT EXISTS kept boolean NOT NULL DEFAULT false`;
+    await q`ALTER TABLE teacher_reviews ADD COLUMN IF NOT EXISTS unclaimed boolean NOT NULL DEFAULT false`;
+    await q`CREATE UNIQUE INDEX IF NOT EXISTS teacher_reviews_user_idx ON teacher_reviews (teacher, user_id) WHERE user_id IS NOT NULL`;
+    await q`ALTER TABLE review_votes ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users (id) ON DELETE CASCADE`;
+    await q`ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users (id) ON DELETE SET NULL`;
+    await q`ALTER TABLE bans ADD COLUMN IF NOT EXISTS scope text NOT NULL DEFAULT 'all'`;
+    await q`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS id bigserial`;
+    await q`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device varchar(80) NOT NULL DEFAULT ''`;
+    await q`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS used_at timestamptz NOT NULL DEFAULT now()`;
+    await q`CREATE TABLE IF NOT EXISTS rep_requests (
+      id bigserial PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      group_id varchar(40) NOT NULL,
+      group_name varchar(80) NOT NULL DEFAULT '',
+      comment varchar(300) NOT NULL DEFAULT '',
+      status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'revoked')),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      decided_at timestamptz
+    )`;
+    await q`CREATE INDEX IF NOT EXISTS rep_requests_user_idx ON rep_requests (user_id, created_at)`;
+    await q`CREATE SEQUENCE IF NOT EXISTS user_sync_rev`;
+    await q`CREATE TABLE IF NOT EXISTS user_sync (
+      user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      section varchar(20) NOT NULL,
+      item varchar(300) NOT NULL,
+      value jsonb,
+      updated_at bigint NOT NULL,
+      rev bigint NOT NULL DEFAULT nextval('user_sync_rev'),
+      PRIMARY KEY (user_id, section, item)
+    )`;
+    await q`CREATE INDEX IF NOT EXISTS user_sync_rev_idx ON user_sync (user_id, rev)`;
   })().catch((error) => {
     ready = null;
     throw error;
@@ -209,14 +243,72 @@ export async function checkRateLimit(bucket: string, limit = 10): Promise<void> 
   if (Math.random() < 0.05) await q`DELETE FROM rate_events WHERE created_at < now() - interval '1 day'`;
 }
 
-export async function assertNotBanned(deviceHashValue: string | null, userId: string | null = null): Promise<void> {
+/** `all` locks the account out completely; the others block one kind of action. */
+export const BAN_SCOPES = ["all", "reviews", "votes", "reports", "chat", "chat_create"] as const;
+export type BanScope = (typeof BAN_SCOPES)[number];
+
+export interface Restriction {
+  scope: BanScope;
+  until: string | null;
+  reason: string;
+}
+
+function toRestriction(row: Row): Restriction {
+  return {
+    scope: String(row.scope) as BanScope,
+    until: row.until ? new Date(row.until as string).toISOString() : null,
+    reason: String(row.reason ?? ""),
+  };
+}
+
+/** Active restrictions, one per scope (the longest wins). */
+export async function activeRestrictions(deviceHashValue: string | null, userId: string | null): Promise<Restriction[]> {
   const rows = await sql()`
-    SELECT 1 FROM bans
+    SELECT DISTINCT ON (scope) scope, until, reason FROM bans
     WHERE (until IS NULL OR until > now())
       AND ((${deviceHashValue}::text IS NOT NULL AND device_hash = ${deviceHashValue})
         OR (${userId}::uuid IS NOT NULL AND user_id = ${userId}::uuid))
-    LIMIT 1`;
-  if (rows.length) throw new ApiError(403, "banned");
+    ORDER BY scope, until DESC NULLS FIRST`;
+  return rows.map(toRestriction);
+}
+
+/** Throws 403 `banned` (full ban) or `restricted` (this action only) with `scope`, `until` and `reason`. */
+export async function assertAllowed(scope: BanScope, deviceHashValue: string | null, userId: string | null): Promise<void> {
+  const found = (await activeRestrictions(deviceHashValue, userId))
+    .filter((item) => item.scope === "all" || item.scope === scope)
+    .sort((a, b) => (a.scope === "all" ? -1 : b.scope === "all" ? 1 : 0))[0];
+  if (found) throw new ApiError(403, found.scope === "all" ? "banned" : "restricted", { ...found });
+}
+
+export async function assertNotBanned(deviceHashValue: string | null, userId: string | null = null): Promise<void> {
+  await assertAllowed("all", deviceHashValue, userId);
+}
+
+const DAY_MS = 86400_000;
+
+/** Reviews need a Telegram or Google sign-in and an account older than a day. */
+export function assertCanReview(user: Row): void {
+  if (user.telegram_id == null && user.google_sub == null) throw new ApiError(403, "social_required");
+  const ready = new Date(user.created_at as string).getTime() + DAY_MS;
+  if (ready > Date.now()) throw new ApiError(403, "account_too_new", { until: new Date(ready).toISOString() });
+}
+
+/** After this date old reviews that nobody signed in to claim are hidden. Unset = never. */
+export function legacyUntil(): string | null {
+  const value = process.env.LEGACY_REVIEWS_UNTIL?.trim();
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+let unclaimedCheckedAt = 0;
+
+export async function hideUnclaimedReviews(): Promise<void> {
+  const until = legacyUntil();
+  if (!until || Date.parse(until) > Date.now() || Date.now() - unclaimedCheckedAt < 600_000) return;
+  unclaimedCheckedAt = Date.now();
+  await sql()`UPDATE teacher_reviews SET hidden = true, unclaimed = true
+    WHERE user_id IS NULL AND NOT kept AND NOT hidden`;
 }
 
 export function cleanText(value: unknown, max: number): string {

@@ -206,7 +206,7 @@ const ru = {
   themeDark: "Тёмная",
   langRu: "Русский",
   langEn: "English",
-  localData: "Расписание, заметки, дела и фото хранятся только на этом устройстве. На сервер уходят анонимные оценки преподавателей и, если вы вошли в аккаунт, сообщения чатов.",
+  localData: "Расписание, заметки, дела и фото хранятся на этом устройстве. Если вы вошли в аккаунт, заметки, дела, пропуски, избранное и настройки синхронизируются через сервер. Отзывы и сообщения чатов тоже хранятся на сервере.",
   updatesInTelegram: "Обновления приложения выходят в Telegram.",
   installTitle: "Установите приложение",
   installText: "Нажмите «Поделиться» внизу экрана, затем «На экран Домой».",
@@ -225,7 +225,7 @@ const ru = {
   noRatings: "Оценок пока нет",
   yourReview: "Ваш отзыв",
   send: "Отправить",
-  ratingAnon: "Отзыв анонимный. С одного устройства — один отзыв, его можно изменить.",
+  ratingAnon: "Отзыв виден всем без имени. Один отзыв с аккаунта и с устройства, его можно изменить.",
   ratingOffline: "Нет связи с сервером. Оценки появятся, когда интернет вернётся.",
   ratingFailed: "Не удалось отправить. Попробуйте позже.",
   rateLimited: "Слишком много изменений. Попробуйте через час.",
@@ -247,7 +247,7 @@ const ru = {
   banned: "Доступ ограничен за нарушение правил",
   announcement: "Объявление",
   account: "Аккаунт",
-  accountHint: "Нужен только для чатов. Расписание, заметки и дела работают без входа.",
+  accountHint: "Нужен для отзывов, чатов и синхронизации заметок, дел и настроек между телефоном и сайтом. Расписание работает без входа.",
   signIn: "Войти",
   signUp: "Создать аккаунт",
   signOut: "Выйти",
@@ -274,7 +274,7 @@ const ru = {
   yourIdHint: "Назовите его или логин другу, чтобы он написал вам лично",
   providerOff: "Этот способ входа ещё не настроен на сервере",
   deleteAccount: "Удалить аккаунт",
-  deleteAccountText: "Аккаунт и вход на всех устройствах будут удалены. Сообщения в чатах исчезнут сами по сроку хранения.",
+  deleteAccountText: "Будут удалены аккаунт, вход на всех устройствах, синхронизированные данные и ваши сообщения в чатах. Данные на этом устройстве останутся.",
   wrongCredentials: "Неверный логин или пароль",
   loginTaken: "Этот логин уже занят",
   badLogin: "Логин: 3–24 символа, латиница, цифры, _ и точка",
@@ -345,7 +345,7 @@ const ru = {
   whatsNewItems: [
     ["Чаты", "Чат группы по коду приглашения и личные сообщения. Написанное без сети отправится позже."],
     ["Закреп, опросы и дела группы", "Староста и помощники могут закрепить сообщение, провести опрос и выложить дедлайны для всей группы."],
-    ["Аккаунт", "Вход по логину и паролю, через Telegram или Google — нужен только для чатов."],
+    ["Аккаунт", "Отзывы, оценки отзывов и жалобы теперь с аккаунтом. Заметки, дела, пропуски, избранное и настройки одинаковые на телефоне и на сайте."],
     ["Отзывы", "Лайки и дизлайки к чужим отзывам и жалобы на нарушителей."],
     ["Где преподаватель", "На странице преподавателя видно, на какой он паре и в какой аудитории, или когда следующая."],
     ["Уведомления", "Уведомления о новых сообщениях приходят, даже когда сайт закрыт."],
@@ -360,11 +360,12 @@ const ru = {
   pinned: "Закреплено",
   pin: "Закрепить",
   unpin: "Открепить",
-  roleOwner: "староста",
+  roleOwner: "создатель",
+  roleRep: "староста",
   roleHelper: "помощник",
   makeHelper: "Сделать помощником",
   removeHelper: "Убрать из помощников",
-  helpersHint: "Староста и помощники могут закреплять сообщения, создавать опросы и дела группы.",
+  helpersHint: "Создатель чата, помощники и подтверждённый староста группы могут закреплять сообщения, создавать опросы и дела группы.",
   polls: "Опросы",
   newPoll: "Новый опрос",
   pollQuestion: "Вопрос",
@@ -389,6 +390,47 @@ const ru = {
   inMine: "Уже в ваших делах",
   noGroupTasks: "Дел группы пока нет",
   add: "Добавить",
+  later: "Позже",
+  needAccountTitle: "Нужен аккаунт",
+  needAccountText: "Отзывы, оценки отзывов и жалобы доступны после входа. Так мы защищаемся от накруток и можем ограничивать нарушителей.",
+  socialRequired: "Отзывы можно оставлять, если вы вошли через Telegram или Google. Привяжите один из них в аккаунте.",
+  deviceUsed: "С этого устройства уже оставлен отзыв этому преподавателю из другого аккаунта.",
+  muted: "Вам запрещено писать в чатах",
+  noCreate: "Вам запрещено создавать чаты и писать новым людям",
+  restrictionsTitle: "Ограничения",
+  loginOfferTitle: "Войдите в аккаунт",
+  loginOfferText: "С аккаунтом можно оставлять отзывы и писать в чатах, а заметки, дела, пропуски, избранное и настройки будут одинаковыми на телефоне и на сайте.",
+  mineHiddenUnclaimed: "Отзыв скрыт, потому что не был привязан к аккаунту. Войдите, чтобы вернуть его.",
+  deleteReviewsQuestion: "Что сделать с вашими отзывами о преподавателях?",
+  deleteWithReviews: "Удалить вместе с аккаунтом",
+  keepReviewsAnon: "Оставить без имени",
+  myReviews: "Мои отзывы",
+  noMyReviews: "Вы ещё не оставляли отзывов",
+  hiddenReview: "скрыт",
+  devices: "Мои устройства",
+  thisDevice: "это устройство",
+  unknownDevice: "Устройство",
+  repTitle: "Староста группы",
+  repHint: "Подтверждённый староста получает значок и права помощника во всех чатах своей группы. Заявку проверит модератор.",
+  repRequest: "Я староста",
+  repComment: "Комментарий для модератора: ФИО, как проверить (необязательно)",
+  repSend: "Отправить заявку",
+  repRejected: "Заявка отклонена. Можно отправить новую.",
+  repCancel: "Отозвать заявку",
+  repStepDown: "Перестать быть старостой",
+  repNoGroup: "Сначала выберите группу в расписании",
+  syncTitle: "Синхронизация",
+  syncHint: "Заметки, дела, пропуски, скрытые пары, избранные преподаватели, группа и настройки одинаковые на всех устройствах с этим аккаунтом.",
+  syncNow: "Синхронизировать",
+  syncFailed: "Не удалось синхронизировать. Попробуем позже.",
+  syncAskTitle: "Объединить данные?",
+  syncAskText: "На этом устройстве и в аккаунте разные заметки, дела или другие данные. Что оставить?",
+  syncMerge: "Объединить",
+  syncMergeHint: "Сохранится всё. Если одно и то же изменено и там, и тут, останется вариант с этого устройства.",
+  syncTakeAccount: "Взять из аккаунта",
+  syncTakeAccountHint: "Данные на этом устройстве заменятся данными из аккаунта.",
+  syncKeepDevice: "Оставить с устройства",
+  syncKeepDeviceHint: "Данные в аккаунте заменятся данными с этого устройства.",
   weekdays: ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"],
   monthsGenitive: ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
   monthsNominative: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
@@ -603,7 +645,7 @@ const en: Strings = {
   themeDark: "Dark",
   langRu: "Русский",
   langEn: "English",
-  localData: "Schedule, notes, tasks and photo stay on this device only. The server receives anonymous teacher ratings and, if you sign in, chat messages.",
+  localData: "Schedule, notes, tasks and photo are stored on this device. When you sign in, notes, tasks, misses, favorites and settings sync through the server. Reviews and chat messages are stored on the server too.",
   updatesInTelegram: "App updates are posted in Telegram.",
   installTitle: "Install the app",
   installText: "Tap Share at the bottom of the screen, then “Add to Home Screen”.",
@@ -622,7 +664,7 @@ const en: Strings = {
   noRatings: "No ratings yet",
   yourReview: "Your review",
   send: "Send",
-  ratingAnon: "Reviews are anonymous. One review per device, you can edit it.",
+  ratingAnon: "Everyone sees the review without your name. One review per account and device, you can edit it.",
   ratingOffline: "No connection to the server. Ratings will appear when you are back online.",
   ratingFailed: "Could not send. Try again later.",
   rateLimited: "Too many changes. Try again in an hour.",
@@ -644,7 +686,7 @@ const en: Strings = {
   banned: "Access is restricted for breaking the rules",
   announcement: "Announcement",
   account: "Account",
-  accountHint: "Only needed for chats. Schedule, notes and tasks work without signing in.",
+  accountHint: "Needed for reviews, chats and syncing notes, tasks and settings between your phone and the website. The schedule works without signing in.",
   signIn: "Sign in",
   signUp: "Create account",
   signOut: "Sign out",
@@ -671,7 +713,7 @@ const en: Strings = {
   yourIdHint: "Share it or your login with a friend so they can message you",
   providerOff: "This sign-in method is not set up on the server yet",
   deleteAccount: "Delete account",
-  deleteAccountText: "The account and its sign-ins on all devices will be deleted. Chat messages expire on their own.",
+  deleteAccountText: "The account, its sign-ins on all devices, synced data and your chat messages will be deleted. Data on this device stays.",
   wrongCredentials: "Wrong login or password",
   loginTaken: "This login is already taken",
   badLogin: "Login: 3–24 characters, Latin letters, digits, _ and dot",
@@ -742,7 +784,7 @@ const en: Strings = {
   whatsNewItems: [
     ["Chats", "Group chat by invite code and direct messages. Messages written offline are sent later."],
     ["Pins, polls and group tasks", "The class rep and helpers can pin a message, run a poll and post deadlines for the whole group."],
-    ["Account", "Sign in with a login and password, Telegram or Google — needed only for chats."],
+    ["Account", "Reviews, review votes and reports now need an account. Notes, tasks, misses, favorites and settings are the same on your phone and the website."],
     ["Reviews", "Like or dislike other people's reviews and report rule-breakers."],
     ["Where is the teacher", "The teacher page shows their current class and room, or the next one."],
     ["Notifications", "New message notifications arrive even when the site is closed."],
@@ -757,11 +799,12 @@ const en: Strings = {
   pinned: "Pinned",
   pin: "Pin",
   unpin: "Unpin",
-  roleOwner: "class rep",
+  roleOwner: "creator",
+  roleRep: "class rep",
   roleHelper: "helper",
   makeHelper: "Make helper",
   removeHelper: "Remove helper",
-  helpersHint: "The class rep and helpers can pin messages and create polls and group tasks.",
+  helpersHint: "The chat creator, helpers and the confirmed class rep of the group can pin messages and create polls and group tasks.",
   polls: "Polls",
   newPoll: "New poll",
   pollQuestion: "Question",
@@ -786,6 +829,47 @@ const en: Strings = {
   inMine: "Already in your tasks",
   noGroupTasks: "No group tasks yet",
   add: "Add",
+  later: "Later",
+  needAccountTitle: "Account needed",
+  needAccountText: "Reviews, review votes and reports need an account. This protects ratings from cheating and lets moderators restrict rule breakers.",
+  socialRequired: "To leave reviews, sign in with Telegram or Google. Link one of them in your account.",
+  deviceUsed: "A review of this teacher was already left from this device by another account.",
+  muted: "You are not allowed to write in chats",
+  noCreate: "You are not allowed to create chats or message new people",
+  restrictionsTitle: "Restrictions",
+  loginOfferTitle: "Sign in",
+  loginOfferText: "With an account you can leave reviews and chat, and your notes, tasks, misses, favorites and settings stay the same on your phone and the website.",
+  mineHiddenUnclaimed: "This review is hidden because it was never linked to an account. Sign in to bring it back.",
+  deleteReviewsQuestion: "What should happen to your teacher reviews?",
+  deleteWithReviews: "Delete them with the account",
+  keepReviewsAnon: "Keep them without a name",
+  myReviews: "My reviews",
+  noMyReviews: "You haven't left any reviews yet",
+  hiddenReview: "hidden",
+  devices: "My devices",
+  thisDevice: "this device",
+  unknownDevice: "Device",
+  repTitle: "Class rep",
+  repHint: "A confirmed class rep gets a badge and helper rights in every chat of their group. A moderator checks the request.",
+  repRequest: "I'm the class rep",
+  repComment: "Note for the moderator: full name, how to check (optional)",
+  repSend: "Send request",
+  repRejected: "The request was declined. You can send a new one.",
+  repCancel: "Withdraw request",
+  repStepDown: "Stop being class rep",
+  repNoGroup: "Pick your group in the schedule first",
+  syncTitle: "Sync",
+  syncHint: "Notes, tasks, misses, hidden classes, favorite teachers, group and settings are the same on every device with this account.",
+  syncNow: "Sync now",
+  syncFailed: "Couldn't sync. We'll try again later.",
+  syncAskTitle: "Combine data?",
+  syncAskText: "This device and your account have different notes, tasks or other data. What should stay?",
+  syncMerge: "Combine",
+  syncMergeHint: "Everything stays. If the same item was changed in both places, this device's version wins.",
+  syncTakeAccount: "Use the account's data",
+  syncTakeAccountHint: "Data on this device is replaced with the account's data.",
+  syncKeepDevice: "Use this device's data",
+  syncKeepDeviceHint: "The account's data is replaced with this device's data.",
   weekdays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
   monthsGenitive: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
   monthsNominative: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
@@ -928,6 +1012,12 @@ function makeCopy(code: "ru" | "en", t: Strings) {
         case "already_linked": return t.alreadyLinked;
         case "last_method": return t.lastMethod;
         case "banned": return t.banned;
+        case "restricted": return t.forbidden;
+        case "muted": return t.muted;
+        case "no_create": return t.noCreate;
+        case "social_required": return t.socialRequired;
+        case "account_too_new": return t.socialRequired;
+        case "device_used": return t.deviceUsed;
         case "own_review": return t.ownReview;
         case "invalid_code": return t.invalidCode;
         case "user_not_found": return t.userNotFound;
@@ -936,6 +1026,16 @@ function makeCopy(code: "ru" | "en", t: Strings) {
         case "text_too_long": return t.textTooLong;
         default: return t.somethingWrong;
       }
+    },
+    /** Like errorText, but spells out restrictions (what, until when, why) when the server sent them. */
+    failureText(error: unknown) {
+      const code = error instanceof Error ? error.message : "";
+      const extra = (error as { extra?: Record<string, unknown> } | null)?.extra ?? {};
+      if ((code === "restricted" || code === "banned") && typeof extra.scope === "string") {
+        return self.restrictionText(extra.scope, (extra.until as string | null) ?? null, String(extra.reason ?? ""));
+      }
+      if (code === "account_too_new" && typeof extra.until === "string") return self.accountTooNew(extra.until);
+      return self.errorText(code);
     },
     levelName(raw: string) {
       const key = raw.trim().toLowerCase();
@@ -1032,6 +1132,71 @@ function makeCopy(code: "ru" | "en", t: Strings) {
     },
     fromChat(title: string) {
       return isEn ? `From “${title}”` : `Из чата «${title}»`;
+    },
+    /** "5 ноября" or "5 ноября, 14:30" from an ISO timestamp, in local time. */
+    moment(iso: string, withTime = false) {
+      const date = new Date(iso);
+      const day = isEn
+        ? `${t.monthsGenitive[date.getMonth()]} ${date.getDate()}`
+        : `${date.getDate()} ${t.monthsGenitive[date.getMonth()]}`;
+      if (!withTime) return day;
+      const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+      return `${day}, ${time}`;
+    },
+    scopeAction(scope: string) {
+      const ru: Record<string, string> = {
+        reviews: "оставлять отзывы",
+        votes: "оценивать отзывы",
+        reports: "отправлять жалобы",
+        chat: "писать в чатах",
+        chat_create: "создавать чаты и писать новым людям",
+      };
+      const en: Record<string, string> = {
+        reviews: "leave reviews",
+        votes: "vote on reviews",
+        reports: "send reports",
+        chat: "write in chats",
+        chat_create: "create chats or message new people",
+      };
+      return (isEn ? en : ru)[scope] ?? (isEn ? "use your account" : "пользоваться аккаунтом");
+    },
+    /** "Вам запрещено оставлять отзывы до 5 ноября. Причина: …" */
+    restrictionText(scope: string, until: string | null, reason: string) {
+      const head = scope === "all"
+        ? t.banned
+        : isEn ? `You are not allowed to ${self.scopeAction(scope)}` : `Вам запрещено ${self.scopeAction(scope)}`;
+      const when = until ? (isEn ? ` until ${self.moment(until, true)}` : ` до ${self.moment(until, true)}`) : isEn ? " permanently" : " навсегда";
+      const why = reason ? (isEn ? `. Reason: ${reason}` : `. Причина: ${reason}`) : "";
+      return `${head}${when}${why}`;
+    },
+    accountTooNew(until: string) {
+      return isEn
+        ? `Your account is new: you can leave reviews from ${self.moment(until, true)}`
+        : `Аккаунт новый: отзывы можно оставлять с ${self.moment(until, true)}`;
+    },
+    legacyWarn(until: string | null) {
+      const tail = until ? (isEn ? ` Otherwise they will be hidden on ${self.moment(until)}.` : ` Иначе ${self.moment(until)} их скроют.`) : "";
+      return isEn
+        ? `Reviews were left from this device without an account. Sign in to keep them yours.${tail}`
+        : `С этого устройства оставлены отзывы без аккаунта. Войдите, чтобы они остались за вами.${tail}`;
+    },
+    legacyMine(until: string | null) {
+      const tail = until ? (isEn ? `, otherwise it will be hidden on ${self.moment(until)}` : `, иначе ${self.moment(until)} его скроют`) : "";
+      return isEn
+        ? `This review isn't linked to an account yet. Sign in${tail}.`
+        : `Этот отзыв ещё не привязан к аккаунту. Войдите${tail}.`;
+    },
+    repPending(group: string) {
+      return isEn ? `Your class rep request for group ${group} is being checked` : `Заявка на старосту группы ${group} на проверке`;
+    },
+    repApproved(group: string) {
+      return isEn ? `You are the class rep of group ${group}` : `Вы староста группы ${group}`;
+    },
+    deviceSeen(iso: string) {
+      return isEn ? `active ${self.moment(iso, true)}` : `был активен ${self.moment(iso, true)}`;
+    },
+    syncDone(iso: string) {
+      return isEn ? `Synced ${self.moment(iso, true)}` : `Синхронизировано ${self.moment(iso, true)}`;
     },
     formatBytes(size: number) {
       const [b, kb, mb] = isEn ? ["B", "KB", "MB"] : ["Б", "КБ", "МБ"];

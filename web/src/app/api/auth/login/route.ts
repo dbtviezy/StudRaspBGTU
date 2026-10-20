@@ -21,5 +21,5 @@ export const POST = handle(async (request: Request) => {
   if (!user?.password_hash || !(await verifyPassword(password, String(user.password_hash)))) {
     throw new ApiError(401, "wrong_credentials");
   }
-  return sessionResponse(user);
+  return sessionResponse(user, request);
 });

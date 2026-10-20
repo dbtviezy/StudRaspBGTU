@@ -19,7 +19,7 @@ export default function ReportDialog({ onSend, onClose }: { onSend: (reason: str
       toast(s.reportSent);
       onClose();
     } catch (e) {
-      setError(s.errorText(e instanceof Error ? e.message : ""));
+      setError(s.failureText(e));
     } finally {
       setBusy(false);
     }
