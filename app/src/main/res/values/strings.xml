@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">БГТУ Расписание</string>
+    <string name="widget_name">Расписание</string>
+    <string name="widget_description">Пары на выбранный день недели</string>
+</resources>

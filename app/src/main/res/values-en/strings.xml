@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">BSTU Schedule</string>
+    <string name="widget_name">Schedule</string>
+    <string name="widget_description">Classes for the selected weekday</string>
+</resources>

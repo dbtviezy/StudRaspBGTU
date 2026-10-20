@@ -1,0 +1,361 @@
+package ru.bgtu.schedule.data
+
+import android.content.Context
+import org.json.JSONObject
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
+
+data class Lesson(
+    val day: Int,
+    val dayName: String,
+    val time: String,
+    val start: String,
+    val end: String,
+    val subject: String,
+    val type: String,
+    val teacher: String,
+    val room: String,
+    val week: String,
+) {
+    val key: String get() = "$day|$time|$subject|$teacher|$room|$week"
+}
+
+data class Group(
+    val id: String,
+    val level: String,
+    val year: Int?,
+    val lessons: List<Lesson>,
+)
+
+data class Faculty(
+    val name: String,
+    val short: String,
+    val groups: List<Group>,
+)
+
+data class ScheduleBundle(
+    val source: String,
+    val periodLabel: String,
+    val fetchedAt: String,
+    val semesterStart: LocalDate,
+    val faculties: List<Faculty>,
+) {
+    val groups: List<Pair<Faculty, Group>> = faculties.flatMap { faculty ->
+        faculty.groups.map { faculty to it }
+    }
+
+    fun find(id: String?): Pair<Faculty, Group>? {
+        if (id.isNullOrBlank()) return null
+        return groups.firstOrNull { it.second.id == id }
+    }
+}
+
+data class WeekInfo(
+    val number: Int,
+    val even: Boolean,
+    val kind: String,
+    val title: String,
+    val kindTitle: String,
+)
+
+object ScheduleRepository {
+    fun load(context: Context): ScheduleBundle {
+        val text = context.assets.open("schedule.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        val root = JSONObject(text)
+        val facultiesJson = root.getJSONArray("faculties")
+        val faculties = buildList {
+            for (i in 0 until facultiesJson.length()) {
+                val faculty = facultiesJson.getJSONObject(i)
+                val groupsJson = faculty.getJSONArray("groups")
+                val groups = buildList {
+                    for (j in 0 until groupsJson.length()) {
+                        val group = groupsJson.getJSONObject(j)
+                        val lessonsJson = group.getJSONArray("lessons")
+                        val lessons = buildList {
+                            for (k in 0 until lessonsJson.length()) {
+                                val lesson = lessonsJson.getJSONObject(k)
+                                add(
+                                    Lesson(
+                                        day = lesson.optInt("day"),
+                                        dayName = lesson.optString("dayName"),
+                                        time = lesson.optString("time"),
+                                        start = lesson.optString("start"),
+                                        end = lesson.optString("end"),
+                                        subject = lesson.optString("subject"),
+                                        type = lesson.optString("type"),
+                                        teacher = lesson.optString("teacher"),
+                                        room = lesson.optString("room"),
+                                        week = lesson.optString("week", "all"),
+                                    ),
+                                )
+                            }
+                        }
+                        val year = if (group.has("year") && !group.isNull("year")) group.getInt("year") else null
+                        add(
+                            Group(
+                                id = group.getString("id"),
+                                level = group.optString("level"),
+                                year = year,
+                                lessons = lessons,
+                            ),
+                        )
+                    }
+                }
+                add(
+                    Faculty(
+                        name = faculty.getString("name"),
+                        short = faculty.getString("short"),
+                        groups = groups,
+                    ),
+                )
+            }
+        }
+        val start = runCatching { LocalDate.parse(root.optString("semesterStart")) }
+            .getOrDefault(LocalDate.of(2026, 9, 1))
+        return ScheduleBundle(
+            source = root.optString("source"),
+            periodLabel = root.optString("periodLabel"),
+            fetchedAt = root.optString("fetchedAt"),
+            semesterStart = start,
+            faculties = faculties,
+        )
+    }
+}
+
+class Prefs(context: Context) {
+    private val sp = context.getSharedPreferences("bgtu", Context.MODE_PRIVATE)
+
+    fun groupId(): String? = sp.getString(KEY_GROUP, null)
+
+    fun setGroup(id: String?) {
+        sp.edit().putString(KEY_GROUP, id).apply()
+    }
+
+    fun name(): String = sp.getString(KEY_NAME, "").orEmpty()
+
+    fun setName(value: String) {
+        sp.edit().putString(KEY_NAME, value.trim()).apply()
+    }
+
+    fun darkTheme(): Boolean = sp.getBoolean(KEY_DARK, false)
+
+    fun setDarkTheme(value: Boolean) {
+        sp.edit().putBoolean(KEY_DARK, value).apply()
+    }
+
+    fun clearProfile() {
+        sp.edit().remove(KEY_GROUP).remove(KEY_NAME).apply()
+    }
+
+    fun note(date: String, lessonKey: String): String = sp.getString(noteKey(date, lessonKey), "").orEmpty()
+
+    fun setNote(date: String, lessonKey: String, value: String) {
+        val key = noteKey(date, lessonKey)
+        val edit = sp.edit()
+        if (value.isBlank()) edit.remove(key) else edit.putString(key, value.trim())
+        edit.apply()
+    }
+
+    fun exportNotes(): Map<String, String> {
+        return sp.all.mapNotNull { (key, value) ->
+            if (key.startsWith("note|") && value is String && value.isNotBlank()) {
+                key.removePrefix("note|") to value
+            } else {
+                null
+            }
+        }.toMap()
+    }
+
+    fun replaceNotes(notes: Map<String, String>) {
+        val edit = sp.edit()
+        sp.all.keys.filter { it.startsWith("note|") }.forEach { edit.remove(it) }
+        notes.forEach { (key, value) ->
+            if (key.isNotBlank() && value.isNotBlank()) edit.putString("note|$key", value)
+        }
+        edit.apply()
+    }
+
+    fun notifyEnabled(): Boolean = sp.getBoolean(KEY_NOTIFY, false)
+
+    fun setNotifyEnabled(value: Boolean) {
+        sp.edit().putBoolean(KEY_NOTIFY, value).apply()
+    }
+
+    fun notifyLead(): Int = sp.getInt(KEY_LEAD, 10)
+
+    fun setNotifyLead(minutes: Int) {
+        sp.edit().putInt(KEY_LEAD, minutes).apply()
+    }
+
+    fun widgetDate(): String? = sp.getString(KEY_WIDGET_DATE, null)
+
+    fun setWidgetDate(iso: String) {
+        sp.edit().putString(KEY_WIDGET_DATE, iso).apply()
+    }
+
+    fun language(): String? = if (sp.contains(KEY_LANG)) sp.getString(KEY_LANG, "ru") else null
+
+    fun setLanguage(value: String) {
+        sp.edit().putString(KEY_LANG, value).apply()
+    }
+
+    fun onboarded(): Boolean = sp.getBoolean(KEY_ONBOARDED, false)
+
+    fun setOnboarded(value: Boolean) {
+        sp.edit().putBoolean(KEY_ONBOARDED, value).apply()
+    }
+
+    fun friendGroup(): String? = sp.getString(KEY_FRIEND, null)
+
+    fun setFriendGroup(id: String?) {
+        val edit = sp.edit()
+        if (id.isNullOrBlank()) edit.remove(KEY_FRIEND) else edit.putString(KEY_FRIEND, id)
+        edit.apply()
+    }
+
+    companion object {
+        private const val KEY_GROUP = "group"
+        private const val KEY_NAME = "name"
+        private const val KEY_DARK = "dark"
+        private const val KEY_NOTIFY = "notify"
+        private const val KEY_LEAD = "notify_lead"
+        private const val KEY_WIDGET_DATE = "widget_date"
+        private const val KEY_LANG = "lang"
+        private const val KEY_ONBOARDED = "onboarded"
+        private const val KEY_FRIEND = "friend"
+
+        private fun noteKey(date: String, lessonKey: String) = "note|$date|$lessonKey"
+    }
+}
+
+fun weekInfo(date: LocalDate, semesterStart: LocalDate): WeekInfo {
+    val startMonday = semesterStart.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val thisMonday = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    val number = (ChronoUnit.WEEKS.between(startMonday, thisMonday) + 1).toInt()
+    val even = number % 2 == 0
+    return WeekInfo(
+        number = number,
+        even = even,
+        kind = if (even) "den" else "num",
+        title = if (even) "чётная неделя" else "нечётная неделя",
+        kindTitle = if (even) "знаменатель" else "числитель",
+    )
+}
+
+fun lessonVisible(lesson: Lesson, kind: String?): Boolean {
+    if (kind == null) return true
+    return lesson.week == "all" || lesson.week == kind
+}
+
+fun activeKind(date: LocalDate, semesterStart: LocalDate, filter: String): String? {
+    return when (filter) {
+        "all" -> null
+        "num" -> "num"
+        "den" -> "den"
+        else -> weekInfo(date, semesterStart).kind
+    }
+}
+
+fun lessonsOn(
+    group: Group,
+    day: Int,
+    date: LocalDate,
+    semesterStart: LocalDate,
+    filter: String,
+): List<Lesson> {
+    val kind = activeKind(date, semesterStart, filter)
+    return group.lessons
+        .filter { it.day == day && lessonVisible(it, kind) }
+        .sortedWith(compareBy({ it.start.ifBlank { "99:99" } }, { it.week }))
+}
+
+fun pairNumber(start: String): Int? = when (start) {
+    "08:00" -> 1
+    "09:45" -> 2
+    "11:30" -> 3
+    "13:20" -> 4
+    "15:05" -> 5
+    "16:50" -> 6
+    "18:35" -> 7
+    "20:00", "20:10" -> 8
+    else -> null
+}
+
+fun parseTime(value: String): LocalTime? = runCatching { LocalTime.parse(value) }.getOrNull()
+
+fun durationPhrase(start: String, end: String): String {
+    val from = parseTime(start) ?: return ""
+    val to = parseTime(end) ?: return ""
+    val mins = ChronoUnit.MINUTES.between(from, to).toInt()
+    if (mins <= 0) return ""
+    val hours = mins / 60
+    val rest = mins % 60
+    val hourText = when (hours) {
+        0 -> ""
+        1 -> "1 час"
+        in 2..4 -> "$hours часа"
+        else -> "$hours часов"
+    }
+    val minuteText = when {
+        rest == 0 -> ""
+        rest % 10 == 1 && rest % 100 != 11 -> "$rest минута"
+        rest % 10 in 2..4 && rest % 100 !in 12..14 -> "$rest минуты"
+        else -> "$rest минут"
+    }
+    return listOf(hourText, minuteText).filter { it.isNotEmpty() }.joinToString(" ")
+}
+
+fun pairsWord(count: Int): String {
+    val mod100 = count % 100
+    val mod10 = count % 10
+    return when {
+        mod100 in 11..14 -> "пар"
+        mod10 == 1 -> "пара"
+        mod10 in 2..4 -> "пары"
+        else -> "пар"
+    }
+}
+
+private val MONTHS = listOf(
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+private val MONTHS_NOM = listOf(
+    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+)
+private val WEEKDAYS = listOf(
+    "понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье",
+)
+val DAY_SHORT = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+
+fun formatLongDate(date: LocalDate): String {
+    val weekday = WEEKDAYS[date.dayOfWeek.value - 1]
+    return "$weekday, ${date.dayOfMonth} ${MONTHS[date.monthValue - 1]}"
+}
+
+fun formatMonth(date: LocalDate): String = "${MONTHS_NOM[date.monthValue - 1]} ${date.year}"
+
+fun greeting(hour: Int): String = when (hour) {
+    in 5..11 -> "Доброе утро"
+    in 12..17 -> "Добрый день"
+    in 18..22 -> "Добрый вечер"
+    else -> "Доброй ночи"
+}
+
+fun weekBadge(week: String): String = when (week) {
+    "num" -> "числитель"
+    "den" -> "знаменатель"
+    else -> "каждую неделю"
+}
+
+fun typeColorKey(type: String): String = when {
+    type.contains("лаб", ignoreCase = true) -> "lab"
+    type.contains("практ", ignoreCase = true) -> "practice"
+    type.contains("электрон", ignoreCase = true) -> "online"
+    type.contains("лек", ignoreCase = true) -> "lecture"
+    else -> "other"
+}
