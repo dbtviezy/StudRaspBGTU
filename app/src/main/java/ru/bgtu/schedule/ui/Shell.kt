@@ -216,13 +216,18 @@ fun BgtuApp() {
             onBackPick = { picking = false },
             onStartPick = { picking = true },
             onReset = {
-                prefs.clearProfile()
-                prefs.setFriendGroup(null)
                 LessonAlerts.cancelAll(context)
+                ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(context)
+                ru.bgtu.schedule.widget.ScheduleWidget.refresh(context.applicationContext)
                 groupId = null
                 studentName = ""
                 picking = true
                 pickingFriend = false
+                shellUi.tab = 0
+                shellUi.selectedDate = LocalDate.now().toString()
+                shellUi.opened = null
+                shellUi.notesVersion++
+                shellUi.tasksVersion++
             },
             onPickGroup = { id ->
                 prefs.setGroup(id)
@@ -428,6 +433,15 @@ private fun MainShell(
     onPickFriend: () -> Unit,
 ) {
     val context = LocalContext.current
+    val today = rememberNow().toLocalDate()
+    var lastToday by remember { mutableStateOf(today) }
+    LaunchedEffect(today) {
+        if (today != lastToday) {
+            if (shellUi.selectedDate == lastToday.toString()) shellUi.selectedDate = today.toString()
+            lastToday = today
+            ru.bgtu.schedule.widget.ScheduleWidget.refresh(context.applicationContext)
+        }
+    }
     val date = remember(shellUi.selectedDate) { LocalDate.parse(shellUi.selectedDate) }
     val tasksTick = shellUi.tasksVersion
 

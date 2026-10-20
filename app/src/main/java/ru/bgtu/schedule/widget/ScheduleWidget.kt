@@ -35,16 +35,21 @@ class ScheduleWidget : android.appwidget.AppWidgetProvider() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == ACTION_DAY) {
-            intent.getStringExtra(EXTRA_DATE)?.let { Prefs(context).setWidgetDate(it) }
-            refresh(context)
-            return
+        when (intent.action) {
+            ACTION_DAY -> {
+                intent.getStringExtra(EXTRA_DATE)?.let { Prefs(context).setWidgetDate(it, LocalDate.now().toString()) }
+                refresh(context)
+            }
+            ACTION_MIDNIGHT, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED, Intent.ACTION_DATE_CHANGED -> {
+                refresh(context)
+            }
+            else -> super.onReceive(context, intent)
         }
-        super.onReceive(context, intent)
     }
 
     companion object {
         private const val ACTION_DAY = "ru.bgtu.schedule.WIDGET_DAY"
+        private const val ACTION_MIDNIGHT = "ru.bgtu.schedule.WIDGET_MIDNIGHT"
         private const val EXTRA_DATE = "date"
         private var cache: ScheduleBundle? = null
 
@@ -58,6 +63,20 @@ class ScheduleWidget : android.appwidget.AppWidgetProvider() {
             val ids = manager.getAppWidgetIds(ComponentName(app, ScheduleWidget::class.java))
             ids.forEach { update(app, manager, it) }
             if (ids.isNotEmpty()) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
+        }
+
+        private fun scheduleMidnight(context: Context) {
+            val alarms = context.getSystemService(android.app.AlarmManager::class.java) ?: return
+            val intent = Intent(context, ScheduleWidget::class.java).setAction(ACTION_MIDNIGHT)
+            val pending = PendingIntent.getBroadcast(
+                context,
+                90,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val at = LocalDate.now().plusDays(1).atStartOfDay().plusSeconds(30)
+                .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            alarms.set(android.app.AlarmManager.RTC, at, pending)
         }
 
         private fun update(context: Context, manager: AppWidgetManager, id: Int) {
@@ -80,7 +99,7 @@ class ScheduleWidget : android.appwidget.AppWidgetProvider() {
             val prefs = Prefs(context)
             val copy = copyOf(prefs.language())
             val shown = shownDate(prefs)
-            prefs.setWidgetDate(shown.toString())
+            scheduleMidnight(context)
             val monday = shown.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
             val nameSize = if (width < 220) 9f else 10f
             val numSize = if (width < 220) 13f else 15f
@@ -149,14 +168,12 @@ class ScheduleWidget : android.appwidget.AppWidgetProvider() {
 
         internal fun shownDate(prefs: Prefs): LocalDate {
             val today = LocalDate.now()
-            val saved = prefs.widgetDate()?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            val anchor = when {
-                saved == null -> today
-                saved.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)) !=
-                    today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)) -> today
-                else -> saved
-            }
-            return if (anchor.dayOfWeek == DayOfWeek.SUNDAY) anchor.minusDays(1) else anchor
+            val base = if (today.dayOfWeek == DayOfWeek.SUNDAY) today.plusDays(1) else today
+            if (prefs.widgetPickedOn() != today.toString()) return base
+            val picked = prefs.widgetDate()?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return base
+            val sameWeek = picked.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)) ==
+                base.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            return if (sameWeek && picked.dayOfWeek != DayOfWeek.SUNDAY) picked else base
         }
 
         internal fun lessons(context: Context): List<Lesson> {

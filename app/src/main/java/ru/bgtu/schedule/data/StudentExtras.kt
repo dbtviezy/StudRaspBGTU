@@ -93,6 +93,8 @@ class AbsenceStore(context: Context) {
 
     fun has(date: String, lessonKey: String): Boolean = all().any { it.date == date && it.lessonKey == lessonKey }
 
+    fun marks(): Set<String> = all().map { "${it.date}|${it.lessonKey}" }.toSet()
+
     fun toggle(date: String, lessonKey: String, subject: String) {
         val next = all().filterNot { it.date == date && it.lessonKey == lessonKey }.toMutableList()
         if (!has(date, lessonKey)) next += Absence(date, lessonKey, subject)
@@ -120,6 +122,17 @@ class AbsenceStore(context: Context) {
         private const val FILE = "bgtu_absences"
         private const val KEY = "items"
     }
+}
+
+private val TEACHER_NAME = Regex("""([А-ЯЁA-Z][а-яёa-z\-]+)((?:\s+[А-ЯЁA-Z]?\.){1,2})""")
+
+// Ratings are keyed by these names; keep identical to splitTeachers() in web/src/lib/schedule.ts.
+fun splitTeachers(raw: String): List<String> {
+    val found = TEACHER_NAME.findAll(raw).map { match ->
+        val initials = match.groupValues[2].split('.').map { it.trim() }.filter { it.isNotEmpty() }
+        (listOf(match.groupValues[1]) + initials.map { "$it." }).joinToString(" ")
+    }.distinct().toList()
+    return found.ifEmpty { listOfNotNull(raw.trim().ifBlank { null }) }
 }
 
 data class TeacherHit(
@@ -295,8 +308,11 @@ class DayOverrides(context: Context) {
         val change = find(date.toString(), lesson.key) ?: return lesson
         if (change.cancelled) return null
         val room = change.room?.takeIf { it.isNotBlank() } ?: return lesson
-        return lesson.copy(room = room)
+        return lesson.copy(room = room, baseKey = lesson.key)
     }
+
+    fun cancelledOn(date: String): Set<String> =
+        all().filter { it.date == date && it.cancelled }.map { it.lessonKey }.toSet()
 
     fun set(date: String, lessonKey: String, cancelled: Boolean, room: String?) {
         val next = all().filterNot { it.date == date && it.lessonKey == lessonKey } +

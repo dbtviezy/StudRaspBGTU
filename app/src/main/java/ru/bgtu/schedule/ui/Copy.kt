@@ -226,6 +226,26 @@ data class Copy(
     val langEn: String,
     val localData: String,
     val updatesInTelegram: String,
+    val missedBadge: String,
+    val restore: String,
+    val ratingTitle: String,
+    val ratingNone: String,
+    val ratingOpen: String,
+    val ratingOverall: String,
+    val ratingDelivery: String,
+    val ratingStrictness: String,
+    val ratingLoyalty: String,
+    val ratingAnonymous: String,
+    val ratingOffline: String,
+    val rateTeacher: String,
+    val editReview: String,
+    val noReviews: String,
+    val reviewText: String,
+    val reviewHint: String,
+    val sendReview: String,
+    val deleteReview: String,
+    val retry: String,
+    val loading: String,
     val weekdays: List<String>,
     val monthsGenitive: List<String>,
     val monthsNominative: List<String>,
@@ -465,6 +485,36 @@ data class Copy(
             else -> "пропусков"
         }
         "$count $word"
+    }
+
+    fun hiddenSection(count: Int): String = if (code == "en") "Hidden · $count" else "Скрыто · $count"
+
+    fun resetFiles(count: Int, size: String): String = if (code == "en") {
+        "Also delete files copied into the app ($count · $size)"
+    } else {
+        "Также удалить файлы, скопированные в приложение ($count · $size)"
+    }
+
+    fun reviewsCount(count: Int): String = if (code == "en") {
+        if (count == 1) "1 rating" else "$count ratings"
+    } else {
+        val mod100 = count % 100
+        val mod10 = count % 10
+        val word = when {
+            mod100 in 11..14 -> "оценок"
+            mod10 == 1 -> "оценка"
+            mod10 in 2..4 -> "оценки"
+            else -> "оценок"
+        }
+        "$count $word"
+    }
+
+    fun ratingError(reason: String): String = when (reason) {
+        "offline" -> ratingOffline
+        "rate_limited" -> if (code == "en") "Too many changes. Try again in an hour." else "Слишком много изменений. Попробуйте через час."
+        "text_too_long" -> if (code == "en") "The review is longer than 300 characters." else "Отзыв длиннее 300 символов."
+        "unknown_teacher" -> if (code == "en") "This teacher is not in the schedule." else "Такого преподавателя нет в расписании."
+        else -> if (code == "en") "Could not save. Try again later." else "Не получилось сохранить. Попробуйте позже."
     }
 
     fun leadOptions(): List<Pair<Int, String>> = listOf(

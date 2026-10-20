@@ -84,6 +84,8 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -230,7 +232,7 @@ fun SplashScreen() {
                 textAlign = TextAlign.Center,
             )
             Text(
-                "БГТУ",
+                "СтудРаспБГТУ",
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 16.sp,
@@ -446,13 +448,15 @@ fun HomeScreen(
     val openTasks = remember(tasksTick) {
         ru.bgtu.schedule.data.sortedTodos(taskStore.all()).filterNot { it.done }
     }
-    val today = LocalDate.now()
+    val clock = rememberNow()
+    val today = clock.toLocalDate()
     val tomorrow = today.plusDays(1)
-    val now = LocalTime.now()
+    val now = clock.toLocalTime()
     val info = weekInfo(today, bundle.semesterStart)
     var quickTick by remember { mutableIntStateOf(0) }
     val hidden = remember(quickTick) { HiddenStore(context).keys() }
     val overrides = remember { DayOverrides(context) }
+    val missed = AbsenceStore(context).marks()
     val todayLessons = shownLessons(group, today.dayOfWeek.value, today, bundle.semesterStart, "auto", hidden, overrides)
     val tomorrowLessons = shownLessons(group, tomorrow.dayOfWeek.value, tomorrow, bundle.semesterStart, "auto", hidden, overrides)
     val status = liveStatus(group, today, now, bundle.semesterStart, hidden, overrides)
@@ -706,6 +710,7 @@ fun HomeScreen(
                             tasksTick = tasksTick,
                             onOpen = { onLesson(row.lesson, day) },
                             onChanged = { quickTick++ },
+                            missed = absenceMark(day, row.lesson) in missed,
                         )
                     }
                     is DayRow.Gap -> Text(
@@ -774,6 +779,12 @@ fun ScheduleScreen(
     val monday = date.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
     val info = weekInfo(date, bundle.semesterStart)
     val lessons = shownLessons(group, date.dayOfWeek.value, date, bundle.semesterStart, filter, hidden, overrides)
+    val missed = AbsenceStore(context).marks()
+    val official = if (holiday == null) lessonsOn(group, date.dayOfWeek.value, date, bundle.semesterStart, filter) else emptyList()
+    val skipped = official.filter { it.key in hidden }
+    val cancelledKeys = overrides.cancelledOn(date.toString())
+    val cancelled = official.filter { it.key !in hidden && it.key in cancelledKeys }
+    var hiddenOpen by rememberSaveable { mutableStateOf(false) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
     var gapEditor by remember { mutableStateOf<String?>(null) }
     val calendarPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
@@ -856,6 +867,7 @@ fun ScheduleScreen(
                     date = date,
                     tasksTick = tick,
                     onChanged = { quickTick++ },
+                    missed = missed,
                 )
             }
         } else if (lessons.isEmpty()) {
@@ -877,6 +889,7 @@ fun ScheduleScreen(
                             tasksTick = tick,
                             onOpen = { onLesson(row.lesson) },
                             onChanged = { quickTick++ },
+                            missed = absenceMark(date, row.lesson) in missed,
                         )
                     }
                     is DayRow.Gap -> Text(
@@ -891,6 +904,26 @@ fun ScheduleScreen(
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
+            }
+        }
+        if (skipped.isNotEmpty() || cancelled.isNotEmpty()) {
+            item(key = "hidden-section") {
+                HiddenSection(
+                    open = hiddenOpen,
+                    onToggle = { hiddenOpen = !hiddenOpen },
+                    skipped = skipped,
+                    cancelled = cancelled,
+                    onRestoreSkipped = { lesson ->
+                        HiddenStore(context).set(lesson.key, false)
+                        refreshAfterLessonChange(context)
+                        quickTick++
+                    },
+                    onRestoreCancelled = { lesson ->
+                        overrides.clear(date.toString(), lesson.key)
+                        refreshAfterLessonChange(context)
+                        quickTick++
+                    },
+                )
             }
         }
     }
@@ -1087,6 +1120,7 @@ fun CalendarScreen(
         for (day in 1..month.lengthOfMonth()) add(month.atDay(day))
     }
     val context = LocalContext.current
+    val todayDate = rememberNow().toLocalDate()
     val hidden = HiddenStore(context).keys()
     val overrides = remember { DayOverrides(context) }
     val holiday = Holidays.on(date)
@@ -1123,7 +1157,7 @@ fun CalendarScreen(
                         Box(Modifier.weight(1f).heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
                             if (cell != null) {
                                 val selected = cell == date
-                                val today = cell == LocalDate.now()
+                                val today = cell == todayDate
                                 val busy = Holidays.on(cell) == null && shownLessons(group, cell.dayOfWeek.value, cell, bundle.semesterStart, filter, hidden, overrides).isNotEmpty()
                                 val off = Holidays.on(cell) != null
                                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onDate(cell) }) {
@@ -1166,8 +1200,14 @@ fun CalendarScreen(
             Text(s.noLessonsThatDay, color = Muted)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val missed = AbsenceStore(context).marks()
                 lessons.forEach { lesson ->
-                    LessonCard(lesson, note = noteOf(date, lesson.key), tasksTick = tick) { onLesson(lesson) }
+                    LessonCard(
+                        lesson,
+                        note = noteOf(date, lesson.key),
+                        tasksTick = tick,
+                        missed = absenceMark(date, lesson) in missed,
+                    ) { onLesson(lesson) }
                 }
             }
         }
@@ -1642,16 +1682,44 @@ fun ProfileScreen(
             )
         }
         if (confirmReset) {
+            val library = remember { ru.bgtu.schedule.data.listLibrary(context) }
+            var dropFiles by remember { mutableStateOf(false) }
             AlertDialog(
                 onDismissRequest = { confirmReset = false },
                 containerColor = Card,
                 titleContentColor = Ink,
                 textContentColor = Muted,
                 title = { Text(s.resetTitle) },
-                text = { Text(s.resetText) },
+                text = {
+                    Column {
+                        Text(s.resetText)
+                        if (library.isNotEmpty()) {
+                            Row(
+                                Modifier
+                                    .padding(top = 12.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { dropFiles = !dropFiles },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = dropFiles,
+                                    onCheckedChange = { dropFiles = it },
+                                    colors = CheckboxDefaults.colors(checkedColor = Color(0xFFE15B64)),
+                                )
+                                Text(
+                                    s.resetFiles(library.size, ru.bgtu.schedule.data.formatBytes(library.sumOf { it.size })),
+                                    color = Ink,
+                                    fontSize = 14.sp,
+                                )
+                            }
+                        }
+                    }
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         confirmReset = false
+                        ru.bgtu.schedule.data.wipeUserData(context, dropFiles)
+                        avatarStamp++
                         onReset()
                     }) { Text(s.reset, color = Color(0xFFE15B64)) }
                 },
@@ -1946,6 +2014,7 @@ fun LessonDialog(
         var hidden by remember(lesson.key) { mutableStateOf(hiddenStore.has(lesson.key)) }
         val teacherFavorites = remember { FavoriteTeachers(context) }
         var starred by remember(lesson.teacher) { mutableStateOf(teacherFavorites.has(lesson.teacher)) }
+        var ratingFor by remember(lesson.key) { mutableStateOf<String?>(null) }
         val absences = remember { AbsenceStore(context) }
         var missed by remember(lesson.key, date) { mutableStateOf(absences.has(date.toString(), lesson.key)) }
         val dayOverrides = remember { DayOverrides(context) }
@@ -2021,6 +2090,13 @@ fun LessonDialog(
                                 starred = !starred
                                 teacherFavorites.set(lesson.teacher, starred)
                             }
+                        }
+                    }
+                    if (lesson.teacher.isNotBlank()) {
+                        val people = remember(lesson.teacher) { ru.bgtu.schedule.data.splitTeachers(lesson.teacher) }
+                        people.forEach { person ->
+                            if (people.size > 1) Text(person, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                            RatingLine(person) { ratingFor = person }
                         }
                     }
                     DetailRow(s.day, s.dayName(lesson.dayName))
@@ -2157,6 +2233,9 @@ fun LessonDialog(
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Blue),
                 ) { Text(s.close) }
+                ratingFor?.let { person ->
+                    TeacherRatingDialog(person) { ratingFor = null }
+                }
                 if (editingTask) {
                     TodoEditorDialog(
                         group = group,
@@ -2183,6 +2262,7 @@ private fun LessonCard(
     caption: String? = null,
     note: String = "",
     tasksTick: Int = 0,
+    missed: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
@@ -2193,10 +2273,12 @@ private fun LessonCard(
     val hasTask = remember(tick, lesson.key) {
         ru.bgtu.schedule.data.TodoStore(context).hasOpen(lesson.key)
     }
+    val fade by animateFloatAsState(if (missed) 0.5f else 1f, tween(220), label = "missedFade")
     Row(
         Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
+            .graphicsLayer { alpha = fade }
             .shadow(8.dp, Shape, ambientColor = Color(0x1420336B), spotColor = Color(0x1020336B))
             .clip(Shape)
             .background(Card)
@@ -2220,7 +2302,24 @@ private fun LessonCard(
         Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(color))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            if (caption != null) Text(caption, color = Muted, fontSize = 11.sp)
+            if (caption != null || missed) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (caption != null) Text(caption, color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f, fill = false))
+                    if (missed) {
+                        if (caption != null) Spacer(Modifier.width(6.dp))
+                        Text(
+                            s.missedBadge,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(99.dp))
+                                .background(Color(0x1FE15B64))
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            color = Color(0xFFE15B64),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
             Text(lesson.subject, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             val meta = listOf(s.lessonType(lesson.type), lesson.room).filter { it.isNotBlank() }.joinToString(" · ")
             if (meta.isNotBlank()) Text(meta, color = Muted, fontSize = 12.sp)
@@ -2339,6 +2438,65 @@ private fun DetailRow(label: String, value: String) {
 }
 
 @Composable
+private fun HiddenSection(
+    open: Boolean,
+    onToggle: () -> Unit,
+    skipped: List<Lesson>,
+    cancelled: List<Lesson>,
+    onRestoreSkipped: (Lesson) -> Unit,
+    onRestoreCancelled: (Lesson) -> Unit,
+) {
+    val s = S
+    val turn by animateFloatAsState(if (open) 180f else 0f, tween(240), label = "hiddenChevron")
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(s.hiddenSection(skipped.size + cancelled.size), color = Muted, fontSize = 12.sp)
+            Icon(
+                Icons.Filled.ExpandMore,
+                contentDescription = null,
+                tint = Muted,
+                modifier = Modifier.padding(start = 2.dp).size(16.dp).graphicsLayer { rotationZ = turn },
+            )
+        }
+        AnimatedVisibility(
+            visible = open,
+            enter = expandVertically(tween(260)) + fadeIn(tween(200)),
+            exit = shrinkVertically(tween(220)) + fadeOut(tween(140)),
+        ) {
+            Column(Modifier.padding(horizontal = 6.dp)) {
+                if (skipped.isNotEmpty()) HiddenGroup(s.hideLesson, skipped, onRestoreSkipped)
+                if (cancelled.isNotEmpty()) HiddenGroup(s.goneToday, cancelled, onRestoreCancelled)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HiddenGroup(title: String, lessons: List<Lesson>, onRestore: (Lesson) -> Unit) {
+    val s = S
+    Text(title, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+    lessons.forEach { lesson ->
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                listOf(lesson.start, lesson.subject.ifBlank { s.lessonFallback }).filter { it.isNotBlank() }.joinToString("  "),
+                color = Muted,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { onRestore(lesson) }) { Text(s.restore, color = Blue, fontSize = 13.sp) }
+        }
+    }
+}
+
+@Composable
 private fun EmptyDay() {
     Box(Modifier.fillMaxWidth().padding(vertical = 28.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2390,54 +2548,59 @@ private fun TeacherLessonsDialog(bundle: ScheduleBundle, name: String, onClose: 
                 lineHeight = 34.sp,
                 modifier = Modifier.padding(horizontal = 20.dp),
             )
-            Text(
-                s.teacherSoon,
-                color = Muted,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp),
-            )
-            if (lessons.isEmpty()) {
-                Text(s.noTeacherSoon, color = Muted, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = LocalBottomInset.current + 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    lessons.groupBy { it.day }.forEach { (day, dayLessons) ->
-                        item(key = "day|$day") {
+            val people = remember(name) { ru.bgtu.schedule.data.splitTeachers(name) }
+            LazyColumn(
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = LocalBottomInset.current + 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(people, key = { "rating|$it" }) { person ->
+                    Column {
+                        if (people.size > 1) {
+                            Text(person, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+                        }
+                        TeacherRatingBlock(person)
+                    }
+                }
+                item(key = "soon") {
+                    Text(s.teacherSoon, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+                }
+                if (lessons.isEmpty()) {
+                    item(key = "none") { Text(s.noTeacherSoon, color = Muted, modifier = Modifier.padding(start = 4.dp)) }
+                }
+                lessons.groupBy { it.day }.forEach { (day, dayLessons) ->
+                    item(key = "day|$day") {
+                        Text(
+                            s.formatLongDateCap(day),
+                            color = Ink,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    items(dayLessons, key = { "${it.day}|${it.groupId}|${it.lesson.key}|${it.lesson.start}" }) { item ->
+                        SoftCard {
                             Text(
-                                s.formatLongDateCap(day),
+                                listOf(item.lesson.start, item.lesson.end).filter { it.isNotBlank() }.joinToString("–"),
+                                color = Blue,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                            )
+                            Text(
+                                item.lesson.subject,
                                 color = Ink,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp,
-                                modifier = Modifier.padding(top = 6.dp),
+                                fontSize = 16.sp,
+                                modifier = Modifier.padding(top = 4.dp),
                             )
-                        }
-                        items(dayLessons, key = { "${it.day}|${it.groupId}|${it.lesson.key}|${it.lesson.start}" }) { item ->
-                            SoftCard {
-                                Text(
-                                    listOf(item.lesson.start, item.lesson.end).filter { it.isNotBlank() }.joinToString("–"),
-                                    color = Blue,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
-                                )
-                                Text(
-                                    item.lesson.subject,
-                                    color = Ink,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 16.sp,
-                                    modifier = Modifier.padding(top = 4.dp),
-                                )
-                                val meta = listOf(
-                                    s.lessonType(item.lesson.type),
-                                    item.groupId,
-                                    item.facultyShort,
-                                    item.lesson.room,
-                                    s.weekBadge(item.lesson.week),
-                                ).filter { it.isNotBlank() }.joinToString(" · ")
-                                if (meta.isNotBlank()) {
-                                    Text(meta, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
-                                }
+                            val meta = listOf(
+                                s.lessonType(item.lesson.type),
+                                item.groupId,
+                                item.facultyShort,
+                                item.lesson.room,
+                                s.weekBadge(item.lesson.week),
+                            ).filter { it.isNotBlank() }.joinToString(" · ")
+                            if (meta.isNotBlank()) {
+                                Text(meta, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
                             }
                         }
                     }
@@ -2613,11 +2776,12 @@ private fun BothColumns(
     date: LocalDate,
     tasksTick: Int,
     onChanged: () -> Unit,
+    missed: Set<String>,
 ) {
     val s = S
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        WeekColumn(s.numeratorColumn, left, Modifier.weight(1f), noteOf, onLesson, date, tasksTick, onChanged)
-        WeekColumn(s.denominatorColumn, right, Modifier.weight(1f), noteOf, onLesson, date, tasksTick, onChanged)
+        WeekColumn(s.numeratorColumn, left, Modifier.weight(1f), noteOf, onLesson, date, tasksTick, onChanged, missed)
+        WeekColumn(s.denominatorColumn, right, Modifier.weight(1f), noteOf, onLesson, date, tasksTick, onChanged, missed)
     }
 }
 
@@ -2631,6 +2795,7 @@ private fun WeekColumn(
     date: LocalDate,
     tasksTick: Int,
     onChanged: () -> Unit,
+    missed: Set<String>,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, color = Blue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -2645,6 +2810,7 @@ private fun WeekColumn(
                     tasksTick = tasksTick,
                     onOpen = { onLesson(lesson) },
                     onChanged = onChanged,
+                    missed = absenceMark(date, lesson) in missed,
                 )
             }
         }
@@ -2660,8 +2826,8 @@ private fun ScheduleLesson(
     onOpen: () -> Unit,
     onChanged: () -> Unit,
     caption: String? = null,
+    missed: Boolean = false,
 ) {
-    val context = LocalContext.current
     var open by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxWidth()) {
         LessonCard(
@@ -2669,6 +2835,7 @@ private fun ScheduleLesson(
             caption = caption,
             note = note,
             tasksTick = tasksTick,
+            missed = missed,
             onLongClick = { open = true },
             onClick = onOpen,
         )
@@ -2835,6 +3002,8 @@ private fun QuickAction(
         Text(label, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
     }
 }
+
+private fun absenceMark(date: LocalDate, lesson: Lesson) = "$date|${lesson.key}"
 
 private fun refreshAfterLessonChange(context: android.content.Context) {
     ru.bgtu.schedule.widget.ScheduleWidget.refresh(context)
