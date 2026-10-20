@@ -1,5 +1,5 @@
 package ru.bgtu.schedule.ui
 
 object AppVersion {
-    const val LABEL = "v1.0"
+    const val LABEL = "v1.1"
 }

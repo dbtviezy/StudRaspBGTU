@@ -19,8 +19,9 @@ data class Lesson(
     val teacher: String,
     val room: String,
     val week: String,
+    val baseKey: String? = null,
 ) {
-    val key: String get() = "$day|$time|$subject|$teacher|$room|$week"
+    val key: String get() = baseKey ?: "$day|$time|$subject|$teacher|$room|$week"
 }
 
 data class Group(
@@ -150,6 +151,13 @@ class Prefs(context: Context) {
         sp.edit().remove(KEY_GROUP).remove(KEY_NAME).apply()
     }
 
+    fun wipeUserData() {
+        val keep = setOf(KEY_DARK, KEY_LANG, KEY_ONBOARDED)
+        val edit = sp.edit()
+        sp.all.keys.filterNot { it in keep }.forEach { edit.remove(it) }
+        edit.apply()
+    }
+
     fun note(date: String, lessonKey: String): String = sp.getString(noteKey(date, lessonKey), "").orEmpty()
 
     fun setNote(date: String, lessonKey: String, value: String) {
@@ -192,8 +200,10 @@ class Prefs(context: Context) {
 
     fun widgetDate(): String? = sp.getString(KEY_WIDGET_DATE, null)
 
-    fun setWidgetDate(iso: String) {
-        sp.edit().putString(KEY_WIDGET_DATE, iso).apply()
+    fun widgetPickedOn(): String? = sp.getString(KEY_WIDGET_PICKED_ON, null)
+
+    fun setWidgetDate(iso: String, pickedOn: String) {
+        sp.edit().putString(KEY_WIDGET_DATE, iso).putString(KEY_WIDGET_PICKED_ON, pickedOn).apply()
     }
 
     fun language(): String? = if (sp.contains(KEY_LANG)) sp.getString(KEY_LANG, "ru") else null
@@ -223,6 +233,7 @@ class Prefs(context: Context) {
         private const val KEY_NOTIFY = "notify"
         private const val KEY_LEAD = "notify_lead"
         private const val KEY_WIDGET_DATE = "widget_date"
+        private const val KEY_WIDGET_PICKED_ON = "widget_picked_on"
         private const val KEY_LANG = "lang"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_FRIEND = "friend"
