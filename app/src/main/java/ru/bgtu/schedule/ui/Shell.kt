@@ -503,7 +503,7 @@ private fun MainShell(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 transitionSpec = {
                     val forward = targetState > initialState
-                    val offset = if (forward) 48 else -48
+                    val offset = if (forward) 24 else -24
                     (fadeIn(tween(240)) + slideInHorizontally { offset }).togetherWith(
                         fadeOut(tween(160)) + slideOutHorizontally { -offset / 2 },
                     )
@@ -638,42 +638,6 @@ private fun MainShell(
             }
             ToastHost()
         }
-    }
-}
-
-@Composable
-private fun LanguageScreen(onPick: (String) -> Unit) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Bg)
-            .padding(start = 20.dp, end = 20.dp, top = 48.dp, bottom = LocalBottomInset.current + 24.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text("Язык", color = Ink, fontWeight = FontWeight.Bold, fontSize = 32.sp)
-        Text("Language", color = Muted, fontSize = 16.sp, modifier = Modifier.padding(top = 4.dp))
-        Spacer(Modifier.height(8.dp))
-        Text("Выберите язык приложения", color = Ink, fontSize = 15.sp)
-        Text("Choose the app language", color = Muted, fontSize = 14.sp)
-        Spacer(Modifier.height(20.dp))
-        LanguageChoice("Русский", "Russian") { onPick("ru") }
-        Spacer(Modifier.height(10.dp))
-        LanguageChoice("English", "Английский") { onPick("en") }
-    }
-}
-
-@Composable
-private fun LanguageChoice(title: String, hint: String, onClick: () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(Card)
-            .clickable(onClick = onClick)
-            .padding(18.dp),
-    ) {
-        Text(title, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-        Text(hint, color = Blue, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
     }
 }
 

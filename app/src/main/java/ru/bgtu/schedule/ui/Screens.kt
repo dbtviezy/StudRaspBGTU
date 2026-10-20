@@ -259,7 +259,7 @@ fun GroupPicker(
     val faculty = bundle.faculties.firstOrNull { it.short == facultyShort }
     val groups = faculty?.groups.orEmpty().filter { group ->
         val q = query.trim()
-        q.isBlank() || group.id.contains(q, true) || group.level.contains(q, true)
+        q.isBlank() || group.id.contains(q, true)
     }
 
     Column(
@@ -275,7 +275,12 @@ fun GroupPicker(
         ) {
             if (faculty != null || onBack != null) {
                 IconButton(onClick = {
-                    if (faculty != null) facultyShort = null else onBack?.invoke()
+                    if (faculty != null) {
+                        facultyShort = null
+                        query = ""
+                    } else {
+                        onBack?.invoke()
+                    }
                 }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = s.back, tint = Ink)
                 }
@@ -290,9 +295,9 @@ fun GroupPicker(
             }
         }
         if (faculty == null) {
-            Text(s.chooseFaculty, Modifier.padding(horizontal = 20.dp), color = Ink, fontWeight = FontWeight.Bold, fontSize = 26.sp)
+            Text(s.chooseFaculty, Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp), color = Ink, fontWeight = FontWeight.Bold, fontSize = 28.sp)
             Text(
-                "${s.facultyThenGroup} ${s.periodLabel(bundle.periodLabel)}.",
+                s.facultyThenGroup,
                 Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 color = Muted,
                 fontSize = 14.sp,
@@ -307,12 +312,19 @@ fun GroupPicker(
                 }
             }
         } else {
-            Text(s.chooseGroup, Modifier.padding(horizontal = 20.dp), color = Ink, fontWeight = FontWeight.Bold, fontSize = 26.sp)
+            Text(faculty.short, Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp), color = Ink, fontWeight = FontWeight.Bold, fontSize = 28.sp)
             Text(
                 S.facultyName(faculty.name),
                 Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 color = Muted,
                 fontSize = 14.sp,
+            )
+            Text(
+                s.chooseGroup,
+                Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp),
+                color = Ink,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
             )
             if (askName) {
                 OutlinedTextField(
@@ -1273,7 +1285,6 @@ fun ProfileScreen(
             pendingCrop = ru.bgtu.schedule.data.decodeBitmap(context, uri)
         }
     }
-    var backupMessage by remember { mutableStateOf<String?>(null) }
     var profileTick by remember { mutableIntStateOf(0) }
     val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -1282,7 +1293,7 @@ fun ProfileScreen(
                 stream.write(Backup.exportJson(context).toByteArray(Charsets.UTF_8))
             }
         }.isSuccess
-        backupMessage = if (wrote) s.backupDone else s.backupFailed
+        Toasts.show(if (wrote) s.backupDone else s.backupFailed)
     }
     val loadBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -1290,16 +1301,16 @@ fun ProfileScreen(
             context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
         }.getOrNull()
         if (text.isNullOrBlank()) {
-            backupMessage = s.backupFailed
+            Toasts.show(s.backupFailed)
             return@rememberLauncherForActivityResult
         }
         val restored = runCatching { Backup.importJson(context, text) }.getOrNull()
         if (restored == null) {
-            backupMessage = s.backupFailed
+            Toasts.show(s.backupFailed)
         } else {
             onRestored(restored.first, restored.second)
             profileTick++
-            backupMessage = s.backupRestored
+            Toasts.show(s.backupRestored)
         }
     }
     val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -1686,19 +1697,6 @@ fun ProfileScreen(
                 },
             )
         }
-        backupMessage?.let { text ->
-            AlertDialog(
-                onDismissRequest = { backupMessage = null },
-                containerColor = Card,
-                titleContentColor = Ink,
-                textContentColor = Muted,
-                title = { Text(s.backupSave) },
-                text = { Text(text) },
-                confirmButton = {
-                    TextButton(onClick = { backupMessage = null }) { Text(s.ok, color = Blue) }
-                },
-            )
-        }
         if (confirmReset) {
             val library = remember { ru.bgtu.schedule.data.listLibrary(context) }
             var dropFiles by remember { mutableStateOf(false) }
@@ -1742,7 +1740,7 @@ fun ProfileScreen(
                     }) { Text(s.reset, color = Red) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { confirmReset = false }) { Text(s.cancel, color = Blue) }
+                    TextButton(onClick = { confirmReset = false }) { Text(s.cancel, color = Muted) }
                 },
             )
         }
@@ -1782,26 +1780,19 @@ fun NotesOverlay(
         Text(s.remindersHint, color = Muted, fontSize = 13.sp)
         Spacer(Modifier.height(12.dp))
         SoftCard {
-            Text(s.evenWeekTitle(info.even).replaceFirstChar { it.uppercase() }, color = Ink, fontWeight = FontWeight.SemiBold)
+            Text(s.studyWeekLine(info.number, info.even), color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Text(s.weekNow(info.number, info.even), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
         Spacer(Modifier.height(10.dp))
         if (items.isEmpty()) {
-            SoftCard { Text(s.noUpcoming, color = Muted) }
+            Text(s.noUpcoming, color = Muted, fontSize = 14.sp)
         } else {
             items.forEach { (day, lesson) ->
-                val whenLabel = s.whenLabel(day, today)
-                SoftCard(onClick = { onLesson(lesson, day) }) {
-                    Text("$whenLabel · ${lesson.start}", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Text(lesson.subject, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
-                    Text(
-                        listOf(s.lessonType(lesson.type), s.roomName(lesson.room), lesson.teacher).filter { it.isNotBlank() }.joinToString(" · "),
-                        color = Muted,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
+                LessonCard(lesson, caption = "${s.whenLabel(day, today)} · ${lesson.start}") {
+                    onClose()
+                    onLesson(lesson, day)
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
             }
         }
     }
@@ -1899,7 +1890,7 @@ fun FilesOverlay(group: Group, onClose: () -> Unit) {
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Blue),
-        ) { Text(if (busy) s.copying else s.addFiles) }
+        ) { Text(if (busy) s.copyingFiles else s.addFiles) }
         Spacer(Modifier.height(12.dp))
         if (items.isEmpty()) {
             SoftCard { Text(if (busy) s.copyingFiles else s.empty, color = Muted) }
@@ -1910,19 +1901,27 @@ fun FilesOverlay(group: Group, onClose: () -> Unit) {
                     Text(stored.file.name, color = Ink, fontWeight = FontWeight.SemiBold)
                     Text(ru.bgtu.schedule.data.formatBytes(stored.size), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                     linked.mapNotNull { key -> lessons.firstOrNull { it.key == key } }.forEach { lesson ->
-                        Text(
-                            "${s.dayName(lesson.dayName)} · ${lesson.start} · ${lesson.subject}",
-                            color = Blue,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "${s.dayName(lesson.dayName)} · ${lesson.start} · ${lesson.subject}",
+                                color = Blue,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = {
+                                tags.link(stored.file.name, lesson.key, false)
+                                tagTick++
+                            }) { Text(s.removeLesson, color = Muted, fontSize = 12.sp) }
+                        }
                     }
                     Row {
                         TextButton(onClick = { openStored(context, stored.file) }) { Text(s.open, color = Blue) }
                         TextButton(onClick = {
                             tagQuery = ""
                             tagging = stored
-                        }) { Text(s.toLesson, color = Blue) }
+                        }) { Text(s.attachToLesson, color = Blue) }
                         TextButton(onClick = { removing = stored }) { Text(s.delete, color = Red) }
                     }
                 }
@@ -2075,15 +2074,17 @@ fun LessonDialog(
         val taskStore = remember { ru.bgtu.schedule.data.TodoStore(context) }
         var taskTick by remember { mutableIntStateOf(0) }
         var editingTask by remember { mutableStateOf(false) }
+        var openTask by remember { mutableStateOf<ru.bgtu.schedule.data.TodoItem?>(null) }
         val lessonTasks = remember(taskTick, lesson.key) { taskStore.forLesson(lesson.key) }
         val tags = remember { ru.bgtu.schedule.data.FileTags(context) }
         var fileTick by remember { mutableIntStateOf(0) }
         val attached = remember(fileTick, lesson.key) { tags.filesFor(context, lesson.key) }
-        val attachPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@rememberLauncherForActivityResult
-            val copied = runCatching { ru.bgtu.schedule.data.importToLibrary(context, uri) }.getOrNull() ?: return@rememberLauncherForActivityResult
-            tags.link(copied.name, lesson.key, true)
+        val attachPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isEmpty()) return@rememberLauncherForActivityResult
+            val copied = uris.mapNotNull { uri -> runCatching { ru.bgtu.schedule.data.importToLibrary(context, uri) }.getOrNull() }
+            copied.forEach { tags.link(it.name, lesson.key, true) }
             fileTick++
+            Toasts.show(if (copied.isEmpty()) s.copyFailed else s.filesCopied(copied.joinToString { it.name }))
         }
         LaunchedEffect(lesson.key) { progress.animateTo(1f, tween(280)) }
         Box(
@@ -2132,8 +2133,8 @@ fun LessonDialog(
                         listOf(lesson.start, lesson.end).filter { it.isNotBlank() }.joinToString("–").ifBlank { lesson.time.ifBlank { "—" } },
                     )
                     pairNumber(lesson.start)?.let { DetailRow(s.pair, it.toString()) }
-                    DetailRow(s.type, s.lessonType(lesson.type).ifBlank { "—" })
-                    DetailRow(s.room, s.roomName(shownRoom).ifBlank { "—" })
+                    s.lessonType(lesson.type).takeIf { it.isNotBlank() }?.let { DetailRow(s.type, it) }
+                    s.roomName(shownRoom).takeIf { it.isNotBlank() }?.let { DetailRow(s.room, it) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(
                             Modifier
@@ -2173,8 +2174,31 @@ fun LessonDialog(
                         Text(s.noTasksForLesson, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
                     } else {
                         lessonTasks.forEach { item ->
-                            Text(item.title, color = Ink, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-                            Text(deadlineText(s, item), color = if (item.isOverdue()) Red else Muted, fontSize = 12.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = item.done,
+                                    onCheckedChange = {
+                                        taskStore.upsert(item.copy(done = !item.done))
+                                        taskTick++
+                                        onTasksChanged()
+                                    },
+                                    colors = CheckboxDefaults.colors(checkedColor = Blue, uncheckedColor = Muted, checkmarkColor = Color.White),
+                                )
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { openTask = item },
+                                ) {
+                                    Text(
+                                        item.title,
+                                        color = Ink,
+                                        fontSize = 14.sp,
+                                        textDecoration = if (item.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                                    )
+                                    Text(deadlineText(s, item), color = if (item.isOverdue()) Red else Muted, fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                     TextButton(onClick = { editingTask = true }, contentPadding = PaddingValues(0.dp)) {
@@ -2186,10 +2210,25 @@ fun LessonDialog(
                         Text(s.nothingAttached, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
                     } else {
                         attached.forEach { stored ->
-                            TextButton(
-                                onClick = { openStored(context, stored.file) },
-                                contentPadding = PaddingValues(0.dp),
-                            ) { Text(stored.file.name, color = Blue) }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(
+                                    onClick = { openStored(context, stored.file) },
+                                    contentPadding = PaddingValues(0.dp),
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text(
+                                        stored.file.name,
+                                        color = Blue,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    tags.link(stored.file.name, lesson.key, false)
+                                    fileTick++
+                                }) { Text(s.removeLesson, color = Muted, fontSize = 13.sp) }
+                            }
                         }
                     }
                     TextButton(
@@ -2317,6 +2356,26 @@ fun LessonDialog(
                             taskTick++
                             onTasksChanged()
                             editingTask = false
+                        },
+                    )
+                }
+                openTask?.let { current ->
+                    TodoEditorDialog(
+                        group = group,
+                        initial = current,
+                        presetLesson = lesson,
+                        onDismiss = { openTask = null },
+                        onSave = { item ->
+                            taskStore.upsert(item)
+                            taskTick++
+                            onTasksChanged()
+                            openTask = null
+                        },
+                        onDelete = {
+                            taskStore.remove(current.id)
+                            taskTick++
+                            onTasksChanged()
+                            openTask = null
                         },
                     )
                 }
@@ -2874,7 +2933,7 @@ private fun LessonQuickMenu(
         ) {
             Column(
                 Modifier
-                    .padding(horizontal = 28.dp)
+                    .padding(horizontal = 12.dp)
                     .fillMaxWidth()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },

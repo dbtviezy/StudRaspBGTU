@@ -220,7 +220,7 @@ fun OnboardingScreen(
             )
         }
         Text(
-            AppVersion.LABEL,
+            "${s.brand} ${AppVersion.LABEL}",
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             color = Muted,
             fontSize = 12.sp,

@@ -40,9 +40,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -85,15 +88,16 @@ fun TasksOverlay(group: Group, onClose: () -> Unit, onChanged: () -> Unit) {
         }
         Text(s.tasksHint, color = Muted, fontSize = 13.sp)
         Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = { creating = true },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Blue),
-        ) { Text(s.addTask) }
+        PrimaryButton(s.addTask, onClick = { creating = true })
         Spacer(Modifier.height(12.dp))
         if (items.isEmpty()) {
-            TaskCard { Text(s.tasksEmpty, color = Muted) }
+            Text(
+                s.tasksEmpty,
+                color = Muted,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
         } else {
             if (open.isNotEmpty()) {
                 Text(s.openTasks, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
@@ -165,21 +169,18 @@ private fun TaskRow(item: TodoItem, onToggle: () -> Unit, onOpen: () -> Unit) {
                 Text(
                     item.title,
                     color = Ink,
-                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    fontWeight = if (item.done) FontWeight.Normal else FontWeight.SemiBold,
                     textDecoration = if (item.done) TextDecoration.LineThrough else null,
                 )
-                val whenText = deadlineText(s, item)
                 Text(
-                    whenText,
+                    if (late) "${s.overdue} · ${deadlineText(s, item)}" else deadlineText(s, item),
                     color = if (late) Red else Muted,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 2.dp),
                 )
-                if (late) {
-                    Text(s.overdue, color = Red, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                }
                 item.lessonLabel?.let { label ->
-                    Text(label, color = Blue, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                    Text(label, color = Blue, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                 }
             }
         }
@@ -319,7 +320,7 @@ fun TodoEditorDialog(
                     TextButton(onClick = onDelete) { Text(s.delete, color = Red) }
                 }
                 TextButton(onClick = onDismiss) { Text(s.cancel, color = Muted) }
-                TextButton(onClick = {
+                TextButton(enabled = title.isNotBlank(), onClick = {
                     val cleanTime = normalizeTime(time)
                     if (time.isNotBlank() && cleanTime == null) {
                         timeError = true
@@ -338,7 +339,7 @@ fun TodoEditorDialog(
                             remind = if (date == null) "" else remind,
                         ),
                     )
-                }) { Text(s.save, color = Blue) }
+                }) { Text(s.save, color = if (title.isNotBlank()) Blue else Muted) }
             }
         }
     }
@@ -406,7 +407,7 @@ fun TodoEditorDialog(
                     }
                 }
                 TextButton(onClick = { pickingLesson = false }, modifier = Modifier.align(Alignment.End)) {
-                    Text(s.close, color = Blue)
+                    Text(s.cancel, color = Muted)
                 }
             }
         }
@@ -418,10 +419,11 @@ private fun TaskCard(onClick: (() -> Unit)? = null, content: @Composable () -> U
     Column(
         Modifier
             .fillMaxWidth()
+            .shadow(8.dp, RoundedCornerShape(22.dp), ambientColor = Color(0x1420336B), spotColor = Color(0x1020336B))
             .clip(RoundedCornerShape(22.dp))
             .background(Card)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(start = 4.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
     ) { content() }
 }
 
