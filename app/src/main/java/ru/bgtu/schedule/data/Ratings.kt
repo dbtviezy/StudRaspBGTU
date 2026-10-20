@@ -35,7 +35,7 @@ sealed class RatingResult {
 }
 
 object RatingApi {
-    const val BASE_URL = "https://studraspbgtu.vercel.app"
+    const val BASE_URL = "https://studraspbgtu-web.vercel.app"
     const val MAX_TEXT = 300
 
     @Volatile
