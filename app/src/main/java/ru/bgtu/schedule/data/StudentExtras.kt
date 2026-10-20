@@ -135,23 +135,47 @@ fun splitTeachers(raw: String): List<String> {
     return found.ifEmpty { listOfNotNull(raw.trim().ifBlank { null }) }
 }
 
-data class TeacherHit(
-    val teacher: String,
-    val groupId: String,
-    val facultyShort: String,
-    val lesson: Lesson,
-)
+/** One person from the schedule; a lesson with two teachers counts for each of them. */
+data class TeacherCard(val name: String, val subjects: List<String>, val groups: Int, val mine: Boolean)
 
-fun searchTeachers(bundle: ScheduleBundle, query: String): List<TeacherHit> {
-    val text = query.trim()
-    if (text.length < 2) return emptyList()
-    return bundle.groups.flatMap { (faculty, group) ->
-        group.lessons.filter { it.teacher.contains(text, true) }.map { lesson ->
-            TeacherHit(lesson.teacher, group.id, faculty.short, lesson)
+private class TeacherEntry(val subjects: MutableSet<String> = sortedSetOf(), val groups: MutableSet<String> = mutableSetOf())
+
+private val directories = java.util.WeakHashMap<ScheduleBundle, Map<String, TeacherEntry>>()
+
+private fun teacherDirectory(bundle: ScheduleBundle): Map<String, TeacherEntry> = synchronized(directories) {
+    directories.getOrPut(bundle) {
+        val directory = mutableMapOf<String, TeacherEntry>()
+        bundle.groups.forEach { (_, group) ->
+            group.lessons.forEach { lesson ->
+                splitTeachers(lesson.teacher).forEach { name ->
+                    val entry = directory.getOrPut(name) { TeacherEntry() }
+                    if (lesson.subject.isNotBlank()) entry.subjects += lesson.subject
+                    entry.groups += group.id
+                }
+            }
         }
-    }.distinctBy { "${it.teacher}|${it.groupId}|${it.lesson.key}" }
-        .sortedWith(compareBy({ it.teacher }, { it.lesson.day }, { it.lesson.start }, { it.groupId }))
-        .take(60)
+        directory
+    }
+}
+
+private val RU_COLLATOR: java.text.Collator = java.text.Collator.getInstance(java.util.Locale("ru"))
+
+/** Teachers of [mine] first, then everyone else, each list alphabetical. An empty query lists only [mine]. */
+fun searchTeachers(bundle: ScheduleBundle, query: String, mine: Group?): List<TeacherCard> {
+    val text = query.trim().lowercase()
+    val own = mine?.lessons?.flatMap { splitTeachers(it.teacher) }?.toSet().orEmpty()
+    return teacherDirectory(bundle).mapNotNull { (name, entry) ->
+        val isMine = name in own
+        val keep = if (text.isNotEmpty()) name.lowercase().contains(text) else isMine
+        if (keep) TeacherCard(name, entry.subjects.toList(), entry.groups.size, isMine) else null
+    }.sortedWith(compareBy<TeacherCard> { !it.mine }.thenComparator { a, b -> RU_COLLATOR.compare(a.name, b.name) })
+        .take(80)
+}
+
+private fun teachesLesson(people: List<String>, raw: String, lesson: Lesson): Boolean {
+    if (lesson.teacher.trim().equals(raw, true)) return true
+    val names = splitTeachers(lesson.teacher)
+    return people.any { it in names }
 }
 
 class FavoriteTeachers(context: Context) {
@@ -192,8 +216,9 @@ fun nextTeacherLessons(
 ): List<TeacherNext> {
     val name = teacher.trim()
     if (name.isBlank()) return emptyList()
+    val people = splitTeachers(teacher)
     val hits = bundle.groups.flatMap { (faculty, group) ->
-        group.lessons.filter { it.teacher.trim().equals(name, true) }.map { Triple(faculty.short, group, it) }
+        group.lessons.filter { teachesLesson(people, name, it) }.map { Triple(faculty.short, group, it) }
     }
     if (hits.isEmpty()) return emptyList()
     val result = mutableListOf<TeacherNext>()

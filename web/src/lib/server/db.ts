@@ -42,6 +42,70 @@ export function ensureSchema(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now()
     )`;
     await q`CREATE INDEX IF NOT EXISTS rate_events_device_idx ON rate_events (device_hash, created_at)`;
+    await q`ALTER TABLE teacher_reviews ADD COLUMN IF NOT EXISTS hidden boolean NOT NULL DEFAULT false`;
+    await q`CREATE TABLE IF NOT EXISTS review_votes (
+      review_id bigint NOT NULL REFERENCES teacher_reviews (id) ON DELETE CASCADE,
+      device_hash text NOT NULL,
+      value smallint NOT NULL CHECK (value IN (-1, 1)),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (review_id, device_hash)
+    )`;
+    await q`CREATE TABLE IF NOT EXISTS reports (
+      id bigserial PRIMARY KEY,
+      kind text NOT NULL CHECK (kind IN ('review', 'message')),
+      target text NOT NULL,
+      snapshot varchar(1000) NOT NULL DEFAULT '',
+      reason varchar(200) NOT NULL DEFAULT '',
+      device_hash text NOT NULL,
+      resolved boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (kind, target, device_hash)
+    )`;
+    await q`CREATE INDEX IF NOT EXISTS reports_open_idx ON reports (resolved, created_at)`;
+    await q`CREATE TABLE IF NOT EXISTS users (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      login text UNIQUE,
+      password_hash text,
+      name varchar(40) NOT NULL,
+      telegram_id bigint UNIQUE,
+      google_sub text UNIQUE,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      seen_at timestamptz NOT NULL DEFAULT now()
+    )`;
+    await q`CREATE TABLE IF NOT EXISTS sessions (
+      token_hash text PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      expires_at timestamptz NOT NULL
+    )`;
+    await q`CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id)`;
+    await q`CREATE TABLE IF NOT EXISTS auth_codes (
+      code_hash text PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      expires_at timestamptz NOT NULL
+    )`;
+    await q`CREATE TABLE IF NOT EXISTS bans (
+      id bigserial PRIMARY KEY,
+      user_id uuid REFERENCES users (id) ON DELETE CASCADE,
+      device_hash text,
+      reason varchar(200) NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      until timestamptz,
+      CHECK (user_id IS NOT NULL OR device_hash IS NOT NULL)
+    )`;
+    await q`CREATE TABLE IF NOT EXISTS announcements (
+      id bigserial PRIMARY KEY,
+      text varchar(500) NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      until timestamptz,
+      active boolean NOT NULL DEFAULT true
+    )`;
+    await q`CREATE TABLE IF NOT EXISTS admin_log (
+      id bigserial PRIMARY KEY,
+      action text NOT NULL,
+      target text NOT NULL DEFAULT '',
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`;
   })().catch((error) => {
     ready = null;
     throw error;
@@ -74,6 +138,9 @@ export interface Summary {
 }
 
 export interface Review {
+  id: number;
+  likes: number;
+  dislikes: number;
   overall: number;
   delivery: number;
   strictness: number;
@@ -97,6 +164,9 @@ export function toSummary(row: Row): Summary {
 
 export function toReview(row: Row): Review {
   return {
+    id: Number(row.id),
+    likes: Number(row.likes ?? 0),
+    dislikes: Number(row.dislikes ?? 0),
     overall: Number(row.overall),
     delivery: Number(row.delivery),
     strictness: Number(row.strictness),
@@ -113,16 +183,35 @@ export async function teacherSummary(teacher: string): Promise<Summary | null> {
       round(avg(delivery), 1)::float8 AS delivery,
       round(avg(strictness), 1)::float8 AS strictness,
       round(avg(loyalty), 1)::float8 AS loyalty
-    FROM teacher_reviews WHERE teacher = ${teacher} GROUP BY teacher`;
+    FROM teacher_reviews WHERE teacher = ${teacher} AND NOT hidden GROUP BY teacher`;
   return rows.length ? toSummary(rows[0]) : null;
 }
 
-export async function checkRateLimit(hash: string): Promise<void> {
+/** `bucket` is a device hash or any other opaque key, e.g. `login:<hash>`. */
+export async function checkRateLimit(bucket: string, limit = 10): Promise<void> {
   const q = sql();
   const rows = await q`
     SELECT count(*)::int AS n FROM rate_events
-    WHERE device_hash = ${hash} AND created_at > now() - interval '1 hour'`;
-  if (Number(rows[0]?.n ?? 0) >= 10) throw new ApiError(429, "rate_limited");
-  await q`INSERT INTO rate_events (device_hash) VALUES (${hash})`;
+    WHERE device_hash = ${bucket} AND created_at > now() - interval '1 hour'`;
+  if (Number(rows[0]?.n ?? 0) >= limit) throw new ApiError(429, "rate_limited");
+  await q`INSERT INTO rate_events (device_hash) VALUES (${bucket})`;
   if (Math.random() < 0.05) await q`DELETE FROM rate_events WHERE created_at < now() - interval '1 day'`;
+}
+
+export async function assertNotBanned(deviceHashValue: string | null, userId: string | null = null): Promise<void> {
+  const rows = await sql()`
+    SELECT 1 FROM bans
+    WHERE (until IS NULL OR until > now())
+      AND ((${deviceHashValue}::text IS NOT NULL AND device_hash = ${deviceHashValue})
+        OR (${userId}::uuid IS NOT NULL AND user_id = ${userId}::uuid))
+    LIMIT 1`;
+  if (rows.length) throw new ApiError(403, "banned");
+}
+
+export function cleanText(value: unknown, max: number): string {
+  if (value == null) return "";
+  if (typeof value !== "string") throw new ApiError(400, "bad_request");
+  const text = value.replace(/\r\n?/g, "\n").trim().replace(/\n{3,}/g, "\n\n");
+  if (Array.from(text).length > max) throw new ApiError(400, "text_too_long");
+  return text;
 }

@@ -18,6 +18,9 @@ import ScheduleScreen from "./screens/Schedule";
 import GroupsScreen from "./screens/Groups";
 import CalendarScreen from "./screens/Calendar";
 import ProfileScreen from "./screens/Profile";
+import ChatScreen from "./screens/Chat";
+import { forgetAccount, useAccount, useAccountRefresh } from "@/lib/account";
+import { cachedChats, clearChatCache, useChatVersion, useOutboxPump } from "@/lib/chat";
 import LessonDialog from "./overlays/LessonDialog";
 import TeacherDialog from "./overlays/TeacherDialog";
 import TasksOverlay, { TodoEditor } from "./overlays/Tasks";
@@ -140,6 +143,8 @@ export default function App() {
       pickFriend={() => setPickingFriend(true)}
       onReset={() => {
         resetData();
+        forgetAccount();
+        clearChatCache();
         setPickingFriend(false);
         setPicking(true);
       }}
@@ -163,6 +168,7 @@ const TABS: { icon: IconName; label: (s: Copy) => string }[] = [
   { icon: "viewDay", label: (s) => s.tabSchedule },
   { icon: "groups", label: (s) => s.tabGroups },
   { icon: "calendar", label: (s) => s.tabCalendar },
+  { icon: "chat", label: (s) => s.tabChat },
   { icon: "person", label: (s) => s.tabProfile },
 ];
 
@@ -182,6 +188,11 @@ function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend,
   const [todo, setTodo] = useState<TodoPreset | null>(null);
   const [toastText, toast] = useToast();
   const selectedDate = pickedDate ?? today;
+  const { user } = useAccount();
+  useAccountRefresh();
+  useOutboxPump(user != null);
+  useChatVersion();
+  const unread = user != null && cachedChats().some((chat) => chat.unread > 0 || !chat.accepted);
 
   const filters = useMemo<Filters>(
     () => ({
@@ -227,7 +238,7 @@ function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend,
     onReset,
   };
 
-  const screens = [HomeScreen, ScheduleScreen, GroupsScreen, CalendarScreen, ProfileScreen];
+  const screens = [HomeScreen, ScheduleScreen, GroupsScreen, CalendarScreen, ChatScreen, ProfileScreen];
   const Screen = screens[tab];
 
   return (
@@ -243,6 +254,7 @@ function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend,
             <button key={item.icon} className={`tab${index === tab ? " on" : ""}`} onClick={() => setTab(index)} aria-current={index === tab ? "page" : undefined}>
               <span className="well">
                 <Icon name={item.icon} size={22} />
+                {item.icon === "chat" && unread && <span className="dot" />}
               </span>
               <span className="label">{item.label(s)}</span>
             </button>

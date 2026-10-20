@@ -64,7 +64,7 @@ const ru = {
   resetData: "Сбросить данные",
   resetTitle: "Сбросить данные?",
   resetText:
-    "Удалятся имя, группы, фото, заметки, пропуски, дела, избранное и изменения в расписании. Тема и язык останутся. Снова откроется выбор факультета и группы.",
+    "Удалятся имя, группы, фото, заметки, пропуски, дела, избранное и изменения в расписании, а на этом устройстве — вход в аккаунт и сохранённая переписка. Тема и язык останутся. Снова откроется выбор факультета и группы.",
   reset: "Сбросить",
   cancel: "Отмена",
   close: "Закрыть",
@@ -206,7 +206,7 @@ const ru = {
   themeDark: "Тёмная",
   langRu: "Русский",
   langEn: "English",
-  localData: "Все данные хранятся только на этом устройстве. У нас нет к ним доступа. Оценки преподавателей отправляются анонимно.",
+  localData: "Расписание, заметки, дела и фото хранятся только на этом устройстве. На сервер уходят анонимные оценки преподавателей и, если вы вошли в аккаунт, сообщения чатов.",
   updatesInTelegram: "Обновления приложения выходят в Telegram.",
   installTitle: "Установите приложение",
   installText: "Нажмите «Поделиться» внизу экрана, затем «На экран Домой».",
@@ -232,6 +232,97 @@ const ru = {
   textTooLong: "Отзыв длиннее 300 символов",
   unknownTeacher: "Этого преподавателя нет в расписании",
   pickOverall: "Поставьте все четыре оценки",
+  tabChat: "Чаты",
+  myTeachers: "Мои преподаватели",
+  otherTeachers: "Другие преподаватели",
+  myTeachersEmpty: "У вашей группы преподаватели не указаны",
+  teacherSearchHint: "Введите фамилию, чтобы найти любого преподавателя университета",
+  like: "Полезный отзыв",
+  dislike: "Бесполезный отзыв",
+  report: "Пожаловаться",
+  reportTitle: "Жалоба",
+  reportText: "Модератор проверит и скроет, если есть нарушение. Что не так? (необязательно)",
+  reportSent: "Жалоба отправлена. Спасибо!",
+  ownReview: "Свой отзыв оценить нельзя",
+  banned: "Доступ ограничен за нарушение правил",
+  announcement: "Объявление",
+  account: "Аккаунт",
+  accountHint: "Нужен только для чатов. Расписание, заметки и дела работают без входа.",
+  signIn: "Войти",
+  signUp: "Создать аккаунт",
+  signOut: "Выйти",
+  signOutEverywhere: "Выйти на всех устройствах",
+  haveAccount: "Уже есть аккаунт? Войти",
+  noAccount: "Нет аккаунта? Создать",
+  loginField: "Логин",
+  loginRule: "3–24 символа: латинские буквы, цифры, _ и точка",
+  passwordField: "Пароль",
+  passwordRule: "Не короче 6 символов",
+  newPassword: "Новый пароль",
+  chatName: "Имя в чатах",
+  chatNameRule: "Его видят собеседники, от 2 до 40 символов",
+  orWord: "или",
+  withTelegram: "Войти через Telegram",
+  withGoogle: "Войти через Google",
+  linkTelegram: "Привязать Telegram",
+  linkGoogle: "Привязать Google",
+  unlink: "Отвязать",
+  linked: "привязан",
+  setPassword: "Добавить логин и пароль",
+  changePassword: "Сменить пароль",
+  yourId: "Ваш ID",
+  yourIdHint: "Назовите его или логин другу, чтобы он написал вам лично",
+  providerOff: "Этот способ входа ещё не настроен на сервере",
+  deleteAccount: "Удалить аккаунт",
+  deleteAccountText: "Аккаунт и вход на всех устройствах будут удалены. Сообщения в чатах исчезнут сами по сроку хранения.",
+  wrongCredentials: "Неверный логин или пароль",
+  loginTaken: "Этот логин уже занят",
+  badLogin: "Логин: 3–24 символа, латиница, цифры, _ и точка",
+  badPassword: "Пароль не короче 6 символов",
+  badName: "Имя от 2 до 40 символов",
+  alreadyLinked: "Этот аккаунт уже привязан к другому профилю",
+  lastMethod: "Нельзя отвязать единственный способ входа",
+  serverOff: "Сервер недоступен. Попробуйте позже.",
+  somethingWrong: "Что-то пошло не так. Попробуйте ещё раз.",
+  tooMany: "Слишком много попыток. Подождите немного.",
+  chatsTitle: "Чаты",
+  chatsSignIn: "Войдите, чтобы переписываться с группой и лично с однокурсниками.",
+  chatsOff: "Чаты ещё не подключены на сервере. Загляните позже.",
+  noChats: "Чатов пока нет. Создайте чат своей группы или войдите по коду от старосты.",
+  createGroupChat: "Создать чат группы",
+  chatTitleField: "Название",
+  joinByCode: "Войти по коду",
+  inviteCode: "Код приглашения",
+  inviteCodeHint: "8 символов, например K7M2QX9P",
+  inviteShare: "Раздайте код одногруппникам — без него в чат не попасть.",
+  newInviteCode: "Новый код",
+  copyCode: "Скопировать код",
+  codeCopied: "Код скопирован",
+  newDirect: "Написать лично",
+  directHint: "Логин или ID собеседника",
+  find: "Найти",
+  chatRequest: "хочет начать переписку",
+  waitingAccept: "Ждём, когда собеседник примет приглашение",
+  accept: "Принять",
+  decline: "Отклонить",
+  leaveChat: "Покинуть чат",
+  leaveChatText: "Чат исчезнет из списка. Вернуться в чат группы можно снова по коду.",
+  messagePlaceholder: "Сообщение",
+  sendMessage: "Отправить",
+  pendingMessage: "Отправится, когда появится сеть",
+  failedMessage: "Не отправлено",
+  offlineBanner: "Нет сети. Сообщения сохранятся и отправятся позже.",
+  noMessages: "Сообщений пока нет. Напишите первым!",
+  chatRetention: "Сообщения группы хранятся 7 дней, личные — 3 дня.",
+  copyText: "Скопировать",
+  invalidCode: "Код не найден",
+  userNotFound: "Никого не нашли",
+  forbidden: "Нет доступа",
+  nearbyAndroidOnly: "Чат с соседями без интернета работает только в Android-приложении.",
+  groupChat: "Чат группы",
+  directChat: "Личный чат",
+  members: "Участники",
+  you: "Вы",
   weekdays: ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"],
   monthsGenitive: ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
   monthsNominative: ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"],
@@ -304,7 +395,7 @@ const en: Strings = {
   resetData: "Reset data",
   resetTitle: "Reset data?",
   resetText:
-    "Your name, groups, photo, notes, absences, tasks, favorites and schedule changes will be removed. Theme and language stay. Faculty and group selection will open again.",
+    "Your name, groups, photo, notes, absences, tasks, favorites and schedule changes will be removed, and this device will be signed out with its saved chats cleared. Theme and language stay. Faculty and group selection will open again.",
   reset: "Reset",
   cancel: "Cancel",
   close: "Close",
@@ -446,7 +537,7 @@ const en: Strings = {
   themeDark: "Dark",
   langRu: "Русский",
   langEn: "English",
-  localData: "Everything stays on this device. We cannot see it. Teacher ratings are sent anonymously.",
+  localData: "Schedule, notes, tasks and photo stay on this device only. The server receives anonymous teacher ratings and, if you sign in, chat messages.",
   updatesInTelegram: "App updates are posted in Telegram.",
   installTitle: "Install the app",
   installText: "Tap Share at the bottom of the screen, then “Add to Home Screen”.",
@@ -472,6 +563,97 @@ const en: Strings = {
   textTooLong: "The review is longer than 300 characters",
   unknownTeacher: "This teacher is not in the schedule",
   pickOverall: "Set all four scores",
+  tabChat: "Chats",
+  myTeachers: "My teachers",
+  otherTeachers: "Other teachers",
+  myTeachersEmpty: "No teachers are listed for your group",
+  teacherSearchHint: "Type a surname to find any teacher of the university",
+  like: "Helpful review",
+  dislike: "Not helpful",
+  report: "Report",
+  reportTitle: "Report",
+  reportText: "A moderator will check it and hide it if it breaks the rules. What is wrong? (optional)",
+  reportSent: "Report sent. Thank you!",
+  ownReview: "You cannot vote on your own review",
+  banned: "Access is restricted for breaking the rules",
+  announcement: "Announcement",
+  account: "Account",
+  accountHint: "Only needed for chats. Schedule, notes and tasks work without signing in.",
+  signIn: "Sign in",
+  signUp: "Create account",
+  signOut: "Sign out",
+  signOutEverywhere: "Sign out on all devices",
+  haveAccount: "Already have an account? Sign in",
+  noAccount: "No account? Create one",
+  loginField: "Login",
+  loginRule: "3–24 characters: Latin letters, digits, _ and dot",
+  passwordField: "Password",
+  passwordRule: "At least 6 characters",
+  newPassword: "New password",
+  chatName: "Name in chats",
+  chatNameRule: "Others see it, 2 to 40 characters",
+  orWord: "or",
+  withTelegram: "Sign in with Telegram",
+  withGoogle: "Sign in with Google",
+  linkTelegram: "Link Telegram",
+  linkGoogle: "Link Google",
+  unlink: "Unlink",
+  linked: "linked",
+  setPassword: "Add login and password",
+  changePassword: "Change password",
+  yourId: "Your ID",
+  yourIdHint: "Share it or your login with a friend so they can message you",
+  providerOff: "This sign-in method is not set up on the server yet",
+  deleteAccount: "Delete account",
+  deleteAccountText: "The account and its sign-ins on all devices will be deleted. Chat messages expire on their own.",
+  wrongCredentials: "Wrong login or password",
+  loginTaken: "This login is already taken",
+  badLogin: "Login: 3–24 characters, Latin letters, digits, _ and dot",
+  badPassword: "Password must be at least 6 characters",
+  badName: "Name must be 2 to 40 characters",
+  alreadyLinked: "This account is already linked to another profile",
+  lastMethod: "You cannot unlink your only sign-in method",
+  serverOff: "The server is unavailable. Try again later.",
+  somethingWrong: "Something went wrong. Try again.",
+  tooMany: "Too many attempts. Please wait a bit.",
+  chatsTitle: "Chats",
+  chatsSignIn: "Sign in to chat with your group and message classmates directly.",
+  chatsOff: "Chats are not connected on the server yet. Check back later.",
+  noChats: "No chats yet. Create a chat for your group or join with a code from your class rep.",
+  createGroupChat: "Create group chat",
+  chatTitleField: "Title",
+  joinByCode: "Join with a code",
+  inviteCode: "Invite code",
+  inviteCodeHint: "8 characters, e.g. K7M2QX9P",
+  inviteShare: "Share the code with your groupmates — the chat is closed without it.",
+  newInviteCode: "New code",
+  copyCode: "Copy code",
+  codeCopied: "Code copied",
+  newDirect: "Message someone",
+  directHint: "Their login or ID",
+  find: "Find",
+  chatRequest: "wants to start a conversation",
+  waitingAccept: "Waiting for them to accept the invitation",
+  accept: "Accept",
+  decline: "Decline",
+  leaveChat: "Leave chat",
+  leaveChatText: "The chat will disappear from the list. You can rejoin a group chat with its code.",
+  messagePlaceholder: "Message",
+  sendMessage: "Send",
+  pendingMessage: "Will be sent when you are back online",
+  failedMessage: "Not sent",
+  offlineBanner: "You are offline. Messages are saved and will be sent later.",
+  noMessages: "No messages yet. Say hi!",
+  chatRetention: "Group messages are kept for 7 days, direct ones for 3 days.",
+  copyText: "Copy",
+  invalidCode: "Code not found",
+  userNotFound: "Nobody found",
+  forbidden: "Access denied",
+  nearbyAndroidOnly: "Offline chat with people nearby works only in the Android app.",
+  groupChat: "Group chat",
+  directChat: "Direct chat",
+  members: "Members",
+  you: "You",
   weekdays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
   monthsGenitive: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
   monthsNominative: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
@@ -486,6 +668,15 @@ function ruPlural(count: number, one: string, few: string, many: string): string
   if (mod10 >= 2 && mod10 <= 4) return few;
   return many;
 }
+
+const FACULTIES_EN: Record<string, string> = {
+  "Механико-технологический факультет": "Faculty of Mechanical Engineering and Technology",
+  "Учебно-научный институт транспорта": "Institute of Transport",
+  "Учебно-научный технологический институт": "Institute of Technology",
+  "Факультет информационных технологий": "Faculty of Information Technology",
+  "Факультет отраслевой и цифровой экономики": "Faculty of Industrial and Digital Economics",
+  "Факультет энергетики и электроники": "Faculty of Power Engineering and Electronics",
+};
 
 const capitalize = (text: string) => (text ? text[0].toUpperCase() + text.slice(1) : text);
 
@@ -569,7 +760,50 @@ function makeCopy(code: "ru" | "en", t: Strings) {
         : `Скопировано в память приложения: ${names}. Это отдельная копия на устройстве, оригинал можно удалить.`;
     },
     periodLabel(raw: string) {
-      return isEn ? raw.replace("семестр", "semester") : raw;
+      return isEn ? raw.replace(/(\d+)\s*семестр/, "semester $1") : raw;
+    },
+    facultyName(raw: string) {
+      if (!isEn) return raw;
+      return FACULTIES_EN[raw.trim()] ?? raw;
+    },
+    roomName(raw: string) {
+      if (!isEn) return raw;
+      return raw.replace("Читальный зал", "Reading room").replace("Спортивный зал", "Gym").replace("Лаборатория", "Lab");
+    },
+    teacherGroups(count: number) {
+      return isEn ? (count === 1 ? "teaches 1 group" : `teaches ${count} groups`) : `ведёт у ${count} ${ruPlural(count, "группы", "групп", "групп")}`;
+    },
+    unreadCount(count: number) {
+      return count > 99 ? "99+" : String(count);
+    },
+    /** Human text for an error code returned by our API or the chat server. */
+    errorText(code: string) {
+      switch (code) {
+        case "offline":
+        case "db_unavailable":
+        case "not_configured":
+        case "server_error":
+        case "chat_unavailable":
+        case "provider_unavailable": return t.serverOff;
+        case "chat_not_configured": return t.chatsOff;
+        case "provider_disabled": return t.providerOff;
+        case "rate_limited": return t.tooMany;
+        case "wrong_credentials": return t.wrongCredentials;
+        case "login_taken": return t.loginTaken;
+        case "invalid_login": return t.badLogin;
+        case "invalid_password": return t.badPassword;
+        case "invalid_name": return t.badName;
+        case "already_linked": return t.alreadyLinked;
+        case "last_method": return t.lastMethod;
+        case "banned": return t.banned;
+        case "own_review": return t.ownReview;
+        case "invalid_code": return t.invalidCode;
+        case "user_not_found": return t.userNotFound;
+        case "forbidden":
+        case "unauthorized": return t.forbidden;
+        case "text_too_long": return t.textTooLong;
+        default: return t.somethingWrong;
+      }
     },
     levelName(raw: string) {
       const key = raw.trim().toLowerCase();
@@ -594,10 +828,10 @@ function makeCopy(code: "ru" | "en", t: Strings) {
     lessonType(raw: string) {
       if (!isEn || !raw) return raw;
       return raw
-        .replace("Электронные лекции", "Online lectures")
-        .replace("Лабораторные работы", "Lab work")
-        .replace("Практические занятия", "Practice")
-        .replace("Лекции", "Lectures");
+        .replaceAll("Электронные лекции", "Online lectures")
+        .replaceAll("Лабораторные работы", "Lab work")
+        .replaceAll("Практические занятия", "Practice")
+        .replaceAll("Лекции", "Lectures");
     },
     span(minutes: number) {
       const hours = Math.floor(minutes / 60);
@@ -661,4 +895,4 @@ const EN = makeCopy("en", en);
 
 export const copyOf = (code: string | null | undefined): Copy => (code === "en" ? EN : RU);
 
-export const APP_VERSION = "v1.1";
+export const APP_VERSION = "v1.2";

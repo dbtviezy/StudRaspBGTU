@@ -78,7 +78,7 @@ fun TasksOverlay(group: Group, onClose: () -> Unit, onChanged: () -> Unit) {
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = LocalBottomInset.current + 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(s.tasks, modifier = Modifier.weight(1f), color = Ink, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+            Text(s.allTasks, modifier = Modifier.weight(1f), color = Ink, fontWeight = FontWeight.Bold, fontSize = 28.sp)
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = s.close, tint = Ink)
             }
@@ -171,12 +171,12 @@ private fun TaskRow(item: TodoItem, onToggle: () -> Unit, onOpen: () -> Unit) {
                 val whenText = deadlineText(s, item)
                 Text(
                     whenText,
-                    color = if (late) Color(0xFFE15B64) else Muted,
+                    color = if (late) Red else Muted,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 2.dp),
                 )
                 if (late) {
-                    Text(s.overdue, color = Color(0xFFE15B64), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text(s.overdue, color = Red, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
                 item.lessonLabel?.let { label ->
                     Text(label, color = Blue, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
@@ -316,7 +316,7 @@ fun TodoEditorDialog(
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 if (onDelete != null) {
-                    TextButton(onClick = onDelete) { Text(s.delete, color = Color(0xFFE15B64)) }
+                    TextButton(onClick = onDelete) { Text(s.delete, color = Red) }
                 }
                 TextButton(onClick = onDismiss) { Text(s.cancel, color = Muted) }
                 TextButton(onClick = {

@@ -309,7 +309,7 @@ fun GroupPicker(
         } else {
             Text(s.chooseGroup, Modifier.padding(horizontal = 20.dp), color = Ink, fontWeight = FontWeight.Bold, fontSize = 26.sp)
             Text(
-                faculty.name,
+                S.facultyName(faculty.name),
                 Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 color = Muted,
                 fontSize = 14.sp,
@@ -390,7 +390,7 @@ private fun FacultyCard(faculty: Faculty, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(faculty.name, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(S.facultyName(faculty.name), color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             Text(s.groupsCount(faculty.groups.size), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
         }
         Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Muted)
@@ -517,6 +517,7 @@ fun HomeScreen(
                 }
             }
         }
+        item { AnnouncementsBanner() }
         item {
             Appear(0) {
                 Box(
@@ -548,7 +549,7 @@ fun HomeScreen(
                         Spacer(Modifier.height(6.dp))
                         Text(group.id, color = Color.White.copy(alpha = 0.92f), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(
-                            faculty.name,
+                            s.facultyName(faculty.name),
                             color = Color.White.copy(alpha = 0.8f),
                             fontSize = 13.sp,
                             modifier = Modifier.padding(top = 2.dp),
@@ -596,7 +597,7 @@ fun HomeScreen(
                 Text(s.tasks, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
                 Text(
                     if (openTasks.isEmpty()) s.tasksEmpty else s.openTasksLine(openTasks.size),
-                    color = if (openTasks.any { it.isOverdue() }) Color(0xFFE15B64) else Muted,
+                    color = if (openTasks.any { it.isOverdue() }) Red else Muted,
                     fontSize = 13.sp,
                     modifier = Modifier.padding(top = 2.dp),
                 )
@@ -735,7 +736,7 @@ fun HomeScreen(
         }
     }
     openedTeacher?.let { name ->
-        TeacherLessonsDialog(bundle, name) { openedTeacher = null }
+        TeacherDialog(bundle, name, onClose = { openedTeacher = null }, onFavoriteChanged = { quickTick++ })
     }
     val gapAt = gapEditor
     if (gapAt != null) {
@@ -798,7 +799,7 @@ fun ScheduleScreen(
     ) {
         item {
             Text(s.schedule, color = Ink, fontWeight = FontWeight.Bold, fontSize = 28.sp)
-            Text("${group.id} · ${faculty.name}", color = Muted, fontSize = 13.sp)
+            Text("${group.id} · ${s.facultyName(faculty.name)}", color = Muted, fontSize = 13.sp)
             Spacer(Modifier.height(4.dp))
             Text(
                 s.formatLongDateCap(date) + " · " + s.evenWeekTitle(info.even),
@@ -969,8 +970,11 @@ fun GroupsScreen(bundle: ScheduleBundle, currentId: String, onPick: (String) -> 
     var mode by rememberSaveable { mutableStateOf("groups") }
     var opened by rememberSaveable { mutableStateOf<String?>(null) }
     var openedTeacher by remember { mutableStateOf<String?>(null) }
-    val teachers = remember(query, bundle, mode) {
-        if (mode == "teachers") searchTeachers(bundle, query) else emptyList()
+    val searching = query.trim().length >= 2
+    val teachers = remember(query, bundle, mode, currentId, favTick) {
+        if (mode != "teachers") return@remember emptyList()
+        val found = searchTeachers(bundle, if (searching) query.trim() else "", bundle.find(currentId)?.second)
+        if (searching) found else found.filter { it.name !in favoriteNames }
     }
     val faculty = bundle.faculties.firstOrNull { it.short == opened }
     val search = query.trim()
@@ -994,7 +998,7 @@ fun GroupsScreen(bundle: ScheduleBundle, currentId: String, onPick: (String) -> 
                     }
                     Column(Modifier.weight(1f)) {
                         Text(faculty.short, color = Ink, fontWeight = FontWeight.Bold, fontSize = 24.sp)
-                        Text(faculty.name, color = Muted, fontSize = 13.sp)
+                        Text(s.facultyName(faculty.name), color = Muted, fontSize = 13.sp)
                     }
                 }
             } else {
@@ -1019,63 +1023,38 @@ fun GroupsScreen(bundle: ScheduleBundle, currentId: String, onPick: (String) -> 
             )
         }
         if (mode == "teachers") {
-            if (query.trim().length < 2) {
-                if (favoriteNames.isNotEmpty()) {
-                    item {
-                        Text(s.favoriteTeachers, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                    }
-                    items(favoriteNames, key = { "fav|$it" }) { name ->
-                        val next = nextTeacherLessons(bundle, name, LocalDate.now(), LocalTime.now(), bundle.semesterStart)
-                        SoftCard(onClick = { openedTeacher = name }) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(name, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                TeacherStar(true) {
-                                    favorites.set(name, false)
-                                    favTick++
-                                }
-                            }
-                            if (next.isEmpty()) {
-                                Text(s.noTeacherSoon, color = Muted, fontSize = 13.sp)
-                            } else {
-                                next.forEach { item ->
-                                    Text(
-                                        teacherFollowLine(s, LocalDate.now(), item),
-                                        color = Blue,
-                                        fontSize = 13.sp,
-                                        modifier = Modifier.padding(top = 4.dp),
-                                    )
-                                }
-                            }
-                        }
+            if (!searching && favoriteNames.isNotEmpty()) {
+                item(key = "favTitle") { SectionTitle(s.favoriteTeachers) }
+                items(favoriteNames, key = { "fav|$it" }) { name ->
+                    TeacherRow(bundle, name, null, favorite = true, onOpen = { openedTeacher = name }) {
+                        favorites.set(name, false)
+                        favTick++
                     }
                 }
-                item { Text(s.teacherHint, color = Muted, modifier = Modifier.padding(8.dp)) }
-            } else if (teachers.isEmpty()) {
-                item { Text(s.nothingFound, color = Muted, modifier = Modifier.padding(8.dp)) }
-            } else {
-                items(teachers, key = { "${it.teacher}|${it.groupId}|${it.lesson.key}" }) { hit ->
-                    val starred = hit.teacher.trim() in favoriteNames
-                    SoftCard {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(hit.teacher, color = Ink, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    "${s.dayName(hit.lesson.dayName)} · ${hit.lesson.start} · ${hit.lesson.subject}",
-                                    color = Muted,
-                                    fontSize = 13.sp,
-                                    modifier = Modifier.padding(top = 2.dp),
-                                )
-                                Text("${hit.groupId} · ${hit.facultyShort} · ${hit.lesson.room}", color = Blue, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
-                            }
-                            if (hit.teacher.isNotBlank()) {
-                                TeacherStar(starred) {
-                                    favorites.set(hit.teacher, !starred)
-                                    favTick++
-                                }
-                            }
-                        }
+            }
+            if (searching && teachers.isEmpty()) {
+                item(key = "none") { Text(s.nothingFound, color = Muted, modifier = Modifier.padding(8.dp)) }
+            }
+            if (teachers.any { it.mine }) {
+                item(key = "mineTitle") { SectionTitle(s.more.myTeachers, Modifier.padding(top = 4.dp)) }
+            }
+            if (!searching && teachers.isEmpty() && favoriteNames.isEmpty()) {
+                item(key = "mineEmpty") { Text(s.more.myTeachersEmpty, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp)) }
+            }
+            teachers.forEachIndexed { index, card ->
+                if (!card.mine && (index == 0 || teachers[index - 1].mine)) {
+                    item(key = "otherTitle") { SectionTitle(s.more.otherTeachers, Modifier.padding(top = 4.dp)) }
+                }
+                item(key = "teacher|${card.name}") {
+                    val starred = card.name in favoriteNames
+                    TeacherRow(bundle, card.name, card, favorite = starred, onOpen = { openedTeacher = card.name }) {
+                        favorites.set(card.name, !starred)
+                        favTick++
                     }
                 }
+            }
+            if (!searching) {
+                item(key = "hint") { Text(s.more.teacherSearchHint, color = Muted, modifier = Modifier.padding(8.dp)) }
             }
         } else if (search.isNotBlank()) {
             items(results, key = { it.second.id + it.first.short }) { (item, group) ->
@@ -1095,7 +1074,49 @@ fun GroupsScreen(bundle: ScheduleBundle, currentId: String, onPick: (String) -> 
         }
     }
     openedTeacher?.let { name ->
-        TeacherLessonsDialog(bundle, name) { openedTeacher = null }
+        TeacherDialog(bundle, name, onClose = { openedTeacher = null }, onFavoriteChanged = { favTick++ })
+    }
+}
+
+@Composable
+private fun TeacherRow(
+    bundle: ScheduleBundle,
+    name: String,
+    card: ru.bgtu.schedule.data.TeacherCard?,
+    favorite: Boolean,
+    onOpen: () -> Unit,
+    onFavorite: () -> Unit,
+) {
+    val s = S
+    val today = LocalDate.now()
+    val next = remember(name, bundle) {
+        nextTeacherLessons(bundle, name, today, LocalTime.now(), bundle.semesterStart, limit = 1).firstOrNull()
+    }
+    val subjects = card?.subjects.orEmpty()
+    SoftCard(onClick = onOpen) {
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f)) {
+                Text(name, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                RatingLine(name, onOpen)
+                if (subjects.isNotEmpty()) {
+                    Text(
+                        subjects.take(2).joinToString(" · ") + if (subjects.size > 2) " +${subjects.size - 2}" else "",
+                        color = Muted,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (card != null) Text(s.teacherGroups(card.groups), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(
+                    if (next == null) s.noTeacherSoon else teacherFollowLine(s, today, next),
+                    color = if (next == null) Muted else Blue,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            TeacherStar(favorite, onFavorite)
+        }
     }
 }
 
@@ -1233,6 +1254,8 @@ fun ProfileScreen(
     onPickFriend: () -> Unit,
     onFriendChanged: () -> Unit,
     onRestored: (String, String) -> Unit = { _, _ -> },
+    onOpenChats: () -> Unit = {},
+    onOpenAdmin: () -> Unit = {},
 ) {
     val s = S
     val context = LocalContext.current
@@ -1327,17 +1350,13 @@ fun ProfileScreen(
         }
         Spacer(Modifier.height(16.dp))
         SoftCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ProfileAvatar(avatarStamp) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                ProfileAvatar(avatarStamp, name) {
                     photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(name.ifBlank { s.studentFallback }, color = Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text(group.id, color = Muted, fontSize = 13.sp)
+                Row {
                     TextButton(
                         onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                        contentPadding = PaddingValues(0.dp),
                     ) { Text(s.changePhoto, color = Blue) }
                     if (ru.bgtu.schedule.data.avatarFile(context).exists()) {
                         TextButton(
@@ -1345,21 +1364,20 @@ fun ProfileScreen(
                                 ru.bgtu.schedule.data.avatarFile(context).delete()
                                 avatarStamp++
                             },
-                            contentPadding = PaddingValues(0.dp),
                         ) { Text(s.removePhoto, color = Muted) }
                     }
                 }
             }
-            Spacer(Modifier.height(14.dp))
             key(dark) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = {
-                        name = it
-                        onName(it)
+                        name = it.take(60)
+                        onName(name)
                     },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text(s.name) },
+                    placeholder = { Text(s.nameHint) },
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
                     colors = fieldColors(),
@@ -1369,20 +1387,33 @@ fun ProfileScreen(
         Spacer(Modifier.height(12.dp))
         SoftCard {
             InfoLine(s.group, group.id)
-            InfoLine(s.faculty, faculty.name)
+            InfoLine(s.faculty, s.facultyName(faculty.name))
             InfoLine(s.level, s.levelName(group.level))
-            InfoLine(s.cohort, group.year?.toString() ?: "—")
-            InfoLine(s.period, s.periodLabel(bundle.periodLabel))
+            group.year?.let { InfoLine(s.cohort, s.cohortValue(it)) }
+            InfoLine(s.period, s.periodLabel(bundle.periodLabel).ifBlank { "—" })
             InfoLine(s.form, s.fullTimeForm)
+            PrimaryButton(s.changeGroup, onChangeGroup, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        AccountCard(onOpenChats = onOpenChats)
+        if (ru.bgtu.schedule.BuildConfig.ADMIN) {
+            Spacer(Modifier.height(12.dp))
+            SoftCard(onClick = onOpenAdmin) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        ProfileCardTitle(s.more.adminPanel, s.more.adminHint)
+                    }
+                    Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Muted)
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {
             val friendId = remember(profileTick) { prefs.friendGroup() }
-            val friendLabel = friendId?.let { bundle.find(it)?.second?.id } ?: friendId
-            Text(s.secondGroup, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(s.secondGroupHint, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            val friendLabel = friendId?.let { id -> bundle.find(id)?.let { "${it.second.id} · ${it.first.short}" } } ?: friendId
+            ProfileCardTitle(s.secondGroup, s.secondGroupHint)
             if (!friendLabel.isNullOrBlank()) {
-                Text(friendLabel, color = Blue, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                Text(friendLabel, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
             }
             Row {
                 TextButton(onClick = onPickFriend) { Text(s.pickSecond, color = Blue) }
@@ -1456,57 +1487,42 @@ fun ProfileScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
+        val openTodos = remember(profileTick) {
+            ru.bgtu.schedule.data.TodoStore(context).all().count { !it.done }
+        }
+        val library = remember(profileTick) { ru.bgtu.schedule.data.listLibrary(context) }
         SoftCard(onClick = onOpenTasks) {
-            Text(s.tasks, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(
-                s.tasksHint,
-                color = Muted,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    ProfileCardTitle(s.tasks, if (openTodos == 0) s.tasksEmpty else s.openTasksLine(openTodos))
+                }
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Muted)
+            }
         }
         Spacer(Modifier.height(12.dp))
         SoftCard(onClick = onOpenFiles) {
-            Text(s.files, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(
-                s.filesHint,
-                color = Muted,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        SoftCard {
-            Text(s.weekHelpTitle, color = Ink, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                s.weekHelp,
-                color = Muted,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(s.fetchedLine, color = Muted, fontSize = 12.sp)
-            TextButton(onClick = {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(bundle.source)))
-            }) {
-                Text(s.openSite, color = Blue)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    ProfileCardTitle(
+                        s.files,
+                        if (library.isEmpty()) s.filesHint else "${library.size} · ${s.formatBytes(library.sumOf { it.size })}",
+                    )
+                }
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Muted)
             }
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {
             val absences = remember(profileTick) { AbsenceStore(context).all() }.groupBy { it.subject.ifBlank { "—" } }
             val limits = remember(profileTick) { AbsenceLimits(context) }
-            Text(s.absences, color = Ink, fontWeight = FontWeight.SemiBold)
-            if (absences.isEmpty()) {
-                Text(s.absencesEmpty, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-            } else {
-                absences.entries.sortedByDescending { it.value.size }.forEach { (subject, items) ->
+            ProfileCardTitle(s.absences, if (absences.isEmpty()) s.absencesEmpty else null)
+            if (absences.isNotEmpty()) {
+                absences.entries.sortedBy { it.key.lowercase() }.forEach { (subject, items) ->
                     val count = items.size
                     val limit = limits.get(subject)
                     val usedUp = limit != null && count >= limit
-                    Text(subject, color = if (usedUp) Color(0xFFE15B64) else Ink, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
-                    Text(s.absenceCount(count), color = if (usedUp) Color(0xFFE15B64) else Blue, fontSize = 12.sp)
+                    Text(subject, color = if (usedUp) Red else Ink, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+                    Text(s.absenceCount(count), color = if (usedUp) Red else Blue, fontSize = 12.sp)
                     if (limit == null) {
                         TextButton(
                             onClick = {
@@ -1519,7 +1535,7 @@ fun ProfileScreen(
                         val left = (limit - count).coerceAtLeast(0)
                         Text(
                             if (usedUp) s.limitUsed else s.skipsLeft(left),
-                            color = if (usedUp) Color(0xFFE15B64) else Blue,
+                            color = if (usedUp) Red else Blue,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(top = 2.dp),
@@ -1545,54 +1561,63 @@ fun ProfileScreen(
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {
+            val notes = remember(profileTick) { SubjectNotes(context).all().entries.sortedBy { it.key.lowercase() } }
+            ProfileCardTitle(s.more.subjectNotesTitle, if (notes.isEmpty()) s.more.subjectNotesEmpty else null)
+            notes.forEach { (subject, note) ->
+                Text(subject, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Text(note, color = Muted, fontSize = 13.sp)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        SoftCard {
             val hiddenLessons = remember(profileTick) {
                 HiddenStore(context).keys().mapNotNull { key -> group.lessons.firstOrNull { it.key == key } }
             }
-            Text(s.hiddenTitle, color = Ink, fontWeight = FontWeight.SemiBold)
-            if (hiddenLessons.isEmpty()) {
-                Text(s.hiddenEmpty, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-            } else {
-                hiddenLessons.forEach { lesson ->
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text(lesson.subject, color = Ink, fontSize = 14.sp)
-                            Text("${s.dayName(lesson.dayName)} · ${lesson.start}", color = Muted, fontSize = 12.sp)
-                        }
-                        TextButton(onClick = {
-                            HiddenStore(context).set(lesson.key, false)
-                            profileTick++
-                            ru.bgtu.schedule.widget.ScheduleWidget.refresh(context)
-                            if (prefs.notifyEnabled()) ru.bgtu.schedule.notify.LessonAlerts.reschedule(context)
-                        }) { Text(s.attendLesson, color = Blue) }
-                    }
+            ProfileCardTitle(s.hiddenTitle, if (hiddenLessons.isEmpty()) s.hiddenEmpty else null)
+            hiddenLessons.forEach { lesson ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                    Text(
+                        "${s.dayName(lesson.dayName)} · ${lesson.start} · ${lesson.subject}",
+                        color = Ink,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        HiddenStore(context).set(lesson.key, false)
+                        profileTick++
+                        ru.bgtu.schedule.widget.ScheduleWidget.refresh(context)
+                        if (prefs.notifyEnabled()) ru.bgtu.schedule.notify.LessonAlerts.reschedule(context)
+                    }) { Text(s.restore, color = Blue) }
                 }
             }
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {
-            Text(s.backupSave, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(s.backupHint, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            ProfileCardTitle(s.backupSave, s.backupHint)
             Row {
-                TextButton(onClick = { saveBackup.launch("bgtu-backup.json") }) { Text(s.backupSave, color = Blue) }
+                TextButton(onClick = { saveBackup.launch("studrasp-backup-${LocalDate.now()}.json") }) { Text(s.backupSave, color = Blue) }
                 TextButton(onClick = { loadBackup.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text(s.backupLoad, color = Blue) }
             }
         }
         Spacer(Modifier.height(12.dp))
-        SoftCard(onClick = {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/ag3r_software")))
-        }) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        SoftCard {
+            ProfileCardTitle(s.contact, s.updatesInTelegram)
+            Button(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/ag3r_software"))) },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Blue),
+            ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_telegram),
                     contentDescription = null,
                     tint = Color.Unspecified,
-                    modifier = Modifier.size(28.dp),
+                    modifier = Modifier.size(20.dp),
                 )
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(s.contact, color = Ink, fontWeight = FontWeight.SemiBold)
-                    Text(s.telegram, color = Blue, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp))
-                }
+                Spacer(Modifier.width(8.dp))
+                Text(s.telegram, fontWeight = FontWeight.SemiBold)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -1611,42 +1636,35 @@ fun ProfileScreen(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(10.dp))
-                Column {
-                    Text(s.localData, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
-                    Text(
-                        s.updatesInTelegram,
-                        color = Blue,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        lineHeight = 18.sp,
-                        modifier = Modifier
-                            .padding(top = 6.dp)
-                            .clickable {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/ag3r_software")))
-                            },
-                    )
-                }
+                Text(s.localData, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
             }
         }
         Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = onChangeGroup,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Blue),
-        ) {
-            Text(s.changeGroup, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(10.dp))
-        TextButton(
-            onClick = { confirmReset = true },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-            Text(s.resetData, color = Color(0xFFE15B64), fontWeight = FontWeight.SemiBold)
+        OutlineButton(s.resetData, onClick = { confirmReset = true }, color = Red)
+        Spacer(Modifier.height(12.dp))
+        SoftCard {
+            val week = weekInfo(LocalDate.now(), bundle.semesterStart)
+            ProfileCardTitle(s.weekHelpTitle)
+            Text(
+                s.weekNow(week.number, week.even),
+                color = Blue,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(s.weekHelp, color = Ink, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 6.dp))
+            Text(s.fetchedLine, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            if (bundle.source.isNotBlank()) {
+                TextButton(onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(bundle.source)))
+                }, contentPadding = PaddingValues(0.dp)) {
+                    Text(s.openSite, color = Blue)
+                }
+            }
         }
         Text(
-            AppVersion.LABEL,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            "${s.brand} ${AppVersion.LABEL}" + if (ru.bgtu.schedule.BuildConfig.ADMIN) " · admin" else "",
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             color = Muted,
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
@@ -1704,7 +1722,7 @@ fun ProfileScreen(
                                 Checkbox(
                                     checked = dropFiles,
                                     onCheckedChange = { dropFiles = it },
-                                    colors = CheckboxDefaults.colors(checkedColor = Color(0xFFE15B64)),
+                                    colors = CheckboxDefaults.colors(checkedColor = Red),
                                 )
                                 Text(
                                     s.resetFiles(library.size, ru.bgtu.schedule.data.formatBytes(library.sumOf { it.size })),
@@ -1721,7 +1739,7 @@ fun ProfileScreen(
                         ru.bgtu.schedule.data.wipeUserData(context, dropFiles)
                         avatarStamp++
                         onReset()
-                    }) { Text(s.reset, color = Color(0xFFE15B64)) }
+                    }) { Text(s.reset, color = Red) }
                 },
                 dismissButton = {
                     TextButton(onClick = { confirmReset = false }) { Text(s.cancel, color = Blue) }
@@ -1732,7 +1750,12 @@ fun ProfileScreen(
 }
 
 @Composable
-fun NotesOverlay(bundle: ScheduleBundle, group: Group, onClose: () -> Unit) {
+fun NotesOverlay(
+    bundle: ScheduleBundle,
+    group: Group,
+    onClose: () -> Unit,
+    onLesson: (Lesson, LocalDate) -> Unit = { _, _ -> },
+) {
     val s = S
     val today = LocalDate.now()
     val info = weekInfo(today, bundle.semesterStart)
@@ -1768,11 +1791,11 @@ fun NotesOverlay(bundle: ScheduleBundle, group: Group, onClose: () -> Unit) {
         } else {
             items.forEach { (day, lesson) ->
                 val whenLabel = s.whenLabel(day, today)
-                SoftCard(onClick = null) {
+                SoftCard(onClick = { onLesson(lesson, day) }) {
                     Text("$whenLabel · ${lesson.start}", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     Text(lesson.subject, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
                     Text(
-                        listOf(s.lessonType(lesson.type), lesson.room, lesson.teacher).filter { it.isNotBlank() }.joinToString(" · "),
+                        listOf(s.lessonType(lesson.type), s.roomName(lesson.room), lesson.teacher).filter { it.isNotBlank() }.joinToString(" · "),
                         color = Muted,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(top = 2.dp),
@@ -1785,7 +1808,7 @@ fun NotesOverlay(bundle: ScheduleBundle, group: Group, onClose: () -> Unit) {
 }
 
 @Composable
-private fun ProfileAvatar(stamp: Int, onPick: () -> Unit) {
+private fun ProfileAvatar(stamp: Int, name: String, onPick: () -> Unit) {
     val context = LocalContext.current
     val bitmap = remember(stamp) {
         val file = ru.bgtu.schedule.data.avatarFile(context)
@@ -1793,17 +1816,29 @@ private fun ProfileAvatar(stamp: Int, onPick: () -> Unit) {
     }
     Box(
         Modifier
-            .size(56.dp)
+            .size(104.dp)
             .clip(CircleShape)
+            .background(BlueSoft)
             .clickable(onClick = onPick),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
             Image(bitmap, contentDescription = S.photo, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
-            Mark(56)
+            Text(
+                name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "С",
+                color = Blue,
+                fontWeight = FontWeight.Bold,
+                fontSize = 40.sp,
+            )
         }
     }
+}
+
+@Composable
+private fun ProfileCardTitle(title: String, hint: String? = null) {
+    Text(title, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+    if (hint != null) Text(hint, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
 }
 
 @Composable
@@ -1816,6 +1851,7 @@ fun FilesOverlay(group: Group, onClose: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var tagging by remember { mutableStateOf<ru.bgtu.schedule.data.StoredFile?>(null) }
+    var removing by remember { mutableStateOf<ru.bgtu.schedule.data.StoredFile?>(null) }
     var tagQuery by remember { mutableStateOf("") }
     var tagTick by remember { mutableIntStateOf(0) }
     val lessons = remember(group.id) {
@@ -1887,15 +1923,30 @@ fun FilesOverlay(group: Group, onClose: () -> Unit) {
                             tagQuery = ""
                             tagging = stored
                         }) { Text(s.toLesson, color = Blue) }
-                        TextButton(onClick = {
-                            tags.forget(stored.file.name)
-                            stored.file.delete()
-                            items = ru.bgtu.schedule.data.listLibrary(context)
-                        }) { Text(s.delete, color = Color(0xFFE15B64)) }
+                        TextButton(onClick = { removing = stored }) { Text(s.delete, color = Red) }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
             }
+        }
+        removing?.let { stored ->
+            AlertDialog(
+                onDismissRequest = { removing = null },
+                containerColor = Card,
+                titleContentColor = Ink,
+                textContentColor = Muted,
+                title = { Text(s.delete) },
+                text = { Text(stored.file.name) },
+                dismissButton = { TextButton(onClick = { removing = null }) { Text(s.cancel, color = Muted) } },
+                confirmButton = {
+                    TextButton(onClick = {
+                        removing = null
+                        tags.forget(stored.file.name)
+                        stored.file.delete()
+                        items = ru.bgtu.schedule.data.listLibrary(context)
+                    }) { Text(s.delete, color = Red) }
+                },
+            )
         }
         val target = tagging
         if (target != null) {
@@ -2021,7 +2072,6 @@ fun LessonDialog(
         var dayChange by remember(lesson.key, date) { mutableStateOf(dayOverrides.find(date.toString(), lesson.key)) }
         var shownRoom by remember(lesson.key, date) { mutableStateOf(lesson.room) }
         var roomDraft by remember(lesson.key, date) { mutableStateOf(dayChange?.room ?: lesson.room) }
-        var editingToday by remember(lesson.key, date) { mutableStateOf(false) }
         val taskStore = remember { ru.bgtu.schedule.data.TodoStore(context) }
         var taskTick by remember { mutableIntStateOf(0) }
         var editingTask by remember { mutableStateOf(false) }
@@ -2077,13 +2127,30 @@ fun LessonDialog(
                     Spacer(Modifier.height(6.dp))
                     Text(lesson.subject, color = Ink, fontWeight = FontWeight.Bold, fontSize = 22.sp)
                     Spacer(Modifier.height(14.dp))
-                    DetailRow(s.time, lesson.time.ifBlank { "—" })
-                    DetailRow(s.pair, pairNumber(lesson.start)?.toString() ?: "—")
+                    DetailRow(
+                        s.time,
+                        listOf(lesson.start, lesson.end).filter { it.isNotBlank() }.joinToString("–").ifBlank { lesson.time.ifBlank { "—" } },
+                    )
+                    pairNumber(lesson.start)?.let { DetailRow(s.pair, it.toString()) }
                     DetailRow(s.type, s.lessonType(lesson.type).ifBlank { "—" })
-                    DetailRow(s.room, shownRoom.ifBlank { "—" })
+                    DetailRow(s.room, s.roomName(shownRoom).ifBlank { "—" })
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            DetailRow(s.teacher, lesson.teacher.ifBlank { "—" })
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .then(if (lesson.teacher.isNotBlank()) Modifier.clickable { ratingFor = lesson.teacher } else Modifier),
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                                Text(s.teacher, color = Muted, fontSize = 12.sp)
+                                Text(
+                                    lesson.teacher.ifBlank { "—" },
+                                    color = if (lesson.teacher.isNotBlank()) Blue else Ink,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
                         }
                         if (lesson.teacher.isNotBlank()) {
                             TeacherStar(starred) {
@@ -2096,10 +2163,10 @@ fun LessonDialog(
                         val people = remember(lesson.teacher) { ru.bgtu.schedule.data.splitTeachers(lesson.teacher) }
                         people.forEach { person ->
                             if (people.size > 1) Text(person, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
-                            RatingLine(person) { ratingFor = person }
+                            RatingLine(person) { ratingFor = lesson.teacher }
                         }
                     }
-                    DetailRow(s.day, s.dayName(lesson.dayName))
+                    DetailRow(s.day, s.formatLongDateCap(date))
                     Spacer(Modifier.height(10.dp))
                     Text(s.tasksForLesson, color = Ink, fontWeight = FontWeight.SemiBold)
                     if (lessonTasks.isEmpty()) {
@@ -2107,7 +2174,7 @@ fun LessonDialog(
                     } else {
                         lessonTasks.forEach { item ->
                             Text(item.title, color = Ink, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-                            Text(deadlineText(s, item), color = if (item.isOverdue()) Color(0xFFE15B64) else Muted, fontSize = 12.sp)
+                            Text(deadlineText(s, item), color = if (item.isOverdue()) Red else Muted, fontSize = 12.sp)
                         }
                     }
                     TextButton(onClick = { editingTask = true }, contentPadding = PaddingValues(0.dp)) {
@@ -2160,11 +2227,9 @@ fun LessonDialog(
                             onRefresh()
                         }) { Text(if (missed) s.clearAbsence else s.wasAbsent, color = Blue) }
                     }
-                    TextButton(
-                        onClick = { editingToday = !editingToday },
-                        contentPadding = PaddingValues(0.dp),
-                    ) { Text(s.todayChange, color = Blue) }
-                    if (editingToday) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(s.todayChange, color = Ink, fontWeight = FontWeight.SemiBold)
+                    run {
                         Text(s.todayOnly, color = Muted, fontSize = 13.sp)
                         OutlinedTextField(
                             value = roomDraft,
@@ -2194,7 +2259,7 @@ fun LessonDialog(
                                 ru.bgtu.schedule.notify.LessonAlerts.reschedule(context)
                             }
                             onClose()
-                        }, contentPadding = PaddingValues(0.dp)) { Text(s.cancelToday, color = Color(0xFFE15B64)) }
+                        }, contentPadding = PaddingValues(0.dp)) { Text(s.cancelToday, color = Red) }
                         if (dayChange != null) {
                             TextButton(onClick = {
                                 dayOverrides.clear(date.toString(), lesson.key)
@@ -2233,8 +2298,13 @@ fun LessonDialog(
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Blue),
                 ) { Text(s.close) }
+                val teacherBundle = LocalBundle.current
                 ratingFor?.let { person ->
-                    TeacherRatingDialog(person) { ratingFor = null }
+                    if (teacherBundle != null) {
+                        TeacherDialog(teacherBundle, person, onClose = { ratingFor = null }, onFavoriteChanged = {
+                            starred = teacherFavorites.has(lesson.teacher)
+                        })
+                    }
                 }
                 if (editingTask) {
                     TodoEditorDialog(
@@ -2274,6 +2344,7 @@ private fun LessonCard(
         ru.bgtu.schedule.data.TodoStore(context).hasOpen(lesson.key)
     }
     val fade by animateFloatAsState(if (missed) 0.5f else 1f, tween(220), label = "missedFade")
+    Box(Modifier.fillMaxWidth()) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -2302,26 +2373,17 @@ private fun LessonCard(
         Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(color))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            if (caption != null || missed) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (caption != null) Text(caption, color = Muted, fontSize = 11.sp, modifier = Modifier.weight(1f, fill = false))
-                    if (missed) {
-                        if (caption != null) Spacer(Modifier.width(6.dp))
-                        Text(
-                            s.missedBadge,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(99.dp))
-                                .background(Color(0x1FE15B64))
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
-                            color = Color(0xFFE15B64),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
+            if (caption != null) {
+                Text(caption, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(end = if (missed) 64.dp else 0.dp))
             }
-            Text(lesson.subject, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            val meta = listOf(s.lessonType(lesson.type), lesson.room).filter { it.isNotBlank() }.joinToString(" · ")
+            Text(
+                lesson.subject,
+                color = Ink,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                modifier = Modifier.padding(end = if (missed && caption == null) 64.dp else 0.dp),
+            )
+            val meta = listOf(s.lessonType(lesson.type), s.roomName(lesson.room)).filter { it.isNotBlank() }.joinToString(" · ")
             if (meta.isNotBlank()) Text(meta, color = Muted, fontSize = 12.sp)
             if (lesson.teacher.isNotBlank()) {
                 Text(lesson.teacher, color = Ink.copy(alpha = 0.75f), fontSize = 12.sp)
@@ -2347,10 +2409,25 @@ private fun LessonCard(
             }
         }
     }
+    if (missed) {
+        Text(
+            s.missedBadge,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(10.dp)
+                .clip(RoundedCornerShape(99.dp))
+                .background(Red)
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+    }
 }
 
 @Composable
-private fun SoftCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+internal fun SoftCard(onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -2392,7 +2469,7 @@ private fun Pill(text: String) {
 }
 
 @Composable
-private fun FilterChip(text: String, selected: Boolean, onClick: () -> Unit) {
+internal fun FilterChip(text: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         text,
         modifier = Modifier
@@ -2408,8 +2485,10 @@ private fun FilterChip(text: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun DayChip(date: LocalDate, selected: Boolean, onClick: () -> Unit) {
+    val today = date == LocalDate.now()
     Column(
         Modifier
+            .widthIn(min = 50.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(if (selected) Blue else Card)
             .clickable(onClick = onClick)
@@ -2417,7 +2496,16 @@ private fun DayChip(date: LocalDate, selected: Boolean, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(S.dayShort[date.dayOfWeek.value - 1], color = if (selected) Color.White.copy(alpha = 0.8f) else Muted, fontSize = 11.sp)
-        Text(date.dayOfMonth.toString(), color = if (selected) Color.White else Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(
+            date.dayOfMonth.toString(),
+            color = when {
+                selected -> Color.White
+                today -> Blue
+                else -> Ink
+            },
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+        )
     }
 }
 
@@ -2430,7 +2518,7 @@ private fun InfoLine(label: String, value: String) {
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
+internal fun DetailRow(label: String, value: String) {
     Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Text(label, color = Muted, fontSize = 12.sp)
         Text(value, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
@@ -2506,111 +2594,10 @@ private fun EmptyDay() {
     }
 }
 
-@Composable
-private fun TeacherLessonsDialog(bundle: ScheduleBundle, name: String, onClose: () -> Unit) {
-    val s = S
-    val today = LocalDate.now()
-    val lessons = nextTeacherLessons(
-        bundle,
-        name,
-        today,
-        LocalTime.now(),
-        bundle.semesterStart,
-        limit = Int.MAX_VALUE,
-    )
-    val heading = teacherHeading(name)
-    Dialog(
-        onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
-        val view = LocalView.current
-        SideEffect {
-            (view.parent as? DialogWindowProvider)?.window?.setBackgroundDrawable(
-                ColorDrawable(android.graphics.Color.TRANSPARENT),
-            )
-        }
-        Column(
-            Modifier
-                .fillMaxSize()
-                .background(Bg)
-                .statusBarsPadding(),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, end = 16.dp)) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = s.back, tint = Ink)
-                }
-            }
-            Text(
-                heading,
-                color = Ink,
-                fontWeight = FontWeight.Bold,
-                fontSize = 28.sp,
-                lineHeight = 34.sp,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            val people = remember(name) { ru.bgtu.schedule.data.splitTeachers(name) }
-            LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = LocalBottomInset.current + 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(people, key = { "rating|$it" }) { person ->
-                    Column {
-                        if (people.size > 1) {
-                            Text(person, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
-                        }
-                        TeacherRatingBlock(person)
-                    }
-                }
-                item(key = "soon") {
-                    Text(s.teacherSoon, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, top = 6.dp))
-                }
-                if (lessons.isEmpty()) {
-                    item(key = "none") { Text(s.noTeacherSoon, color = Muted, modifier = Modifier.padding(start = 4.dp)) }
-                }
-                lessons.groupBy { it.day }.forEach { (day, dayLessons) ->
-                    item(key = "day|$day") {
-                        Text(
-                            s.formatLongDateCap(day),
-                            color = Ink,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp,
-                            modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
-                    items(dayLessons, key = { "${it.day}|${it.groupId}|${it.lesson.key}|${it.lesson.start}" }) { item ->
-                        SoftCard {
-                            Text(
-                                listOf(item.lesson.start, item.lesson.end).filter { it.isNotBlank() }.joinToString("–"),
-                                color = Blue,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
-                            )
-                            Text(
-                                item.lesson.subject,
-                                color = Ink,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 16.sp,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
-                            val meta = listOf(
-                                s.lessonType(item.lesson.type),
-                                item.groupId,
-                                item.facultyShort,
-                                item.lesson.room,
-                                s.weekBadge(item.lesson.week),
-                            ).filter { it.isNotBlank() }.joinToString(" · ")
-                            if (meta.isNotBlank()) {
-                                Text(meta, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+private val HEADING_NAME = Regex("""[А-ЯЁA-Z][а-яёa-z\-]+(?:\s+[А-ЯЁA-Z]?\.){1,2}""")
 
-private fun teacherHeading(raw: String): String {
+internal fun teacherHeading(raw: String): String {
+    if (HEADING_NAME.containsMatchIn(raw)) return ru.bgtu.schedule.data.splitTeachers(raw).joinToString("\n")
     val people = raw.split(Regex("[,;/]|\\s+и\\s+"))
     return people.map { formatTeacher(it) }.filter { it.isNotBlank() }.joinToString("\n").ifBlank { raw.trim() }
 }
@@ -2631,7 +2618,7 @@ private fun formatTeacher(raw: String): String {
 }
 
 @Composable
-private fun TeacherStar(on: Boolean, onClick: () -> Unit) {
+internal fun TeacherStar(on: Boolean, onClick: () -> Unit) {
     IconButton(onClick = onClick) {
         Icon(
             if (on) Icons.Filled.Star else Icons.Filled.StarBorder,
@@ -2641,8 +2628,8 @@ private fun TeacherStar(on: Boolean, onClick: () -> Unit) {
     }
 }
 
-private fun teacherFollowLine(copy: Copy, today: LocalDate, item: TeacherNext): String {
-    val place = listOf(item.lesson.subject, item.groupId, item.lesson.room).filter { it.isNotBlank() }.joinToString(" · ")
+internal fun teacherFollowLine(copy: Copy, today: LocalDate, item: TeacherNext): String {
+    val place = listOf(item.lesson.subject, item.groupId, copy.roomName(item.lesson.room)).filter { it.isNotBlank() }.joinToString(" · ")
     return "${copy.whenLabel(item.day, today)} · ${item.lesson.start} · $place"
 }
 
@@ -2653,7 +2640,7 @@ private fun TaskPreviewLine(item: TodoItem) {
 }
 
 @Composable
-private fun Appear(index: Int, content: @Composable () -> Unit) {
+internal fun Appear(index: Int, content: @Composable () -> Unit) {
     val progress = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         delay((index.coerceAtMost(8) * 36).toLong())
@@ -2668,7 +2655,7 @@ private fun Appear(index: Int, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+internal fun fieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = Blue,
     unfocusedBorderColor = Line,
     focusedContainerColor = Card,
@@ -2961,7 +2948,7 @@ private fun LessonQuickMenu(
                 QuickAction(
                     icon = Icons.Filled.Close,
                     label = s.goneToday,
-                    tint = Color(0xFFE15B64),
+                    tint = Red,
                     well = Color(0x1AE15B64),
                 ) {
                     dayOverrides.set(date.toString(), lesson.key, cancelled = true, room = null)

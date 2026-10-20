@@ -19,6 +19,7 @@ import { originOf, switchTheme } from "@/lib/theme";
 import { useShell } from "../context";
 import { Icon } from "../Icons";
 import { GapRow, ScheduleLesson } from "../LessonCard";
+import { Announcements } from "../Announcements";
 import { Appear, LanguageMark, Mark } from "../ui";
 
 export function liveLine(s: Copy, status: LiveStatus): string {
@@ -27,9 +28,9 @@ export function liveLine(s: Copy, status: LiveStatus): string {
     case "off":
       return s.code === "en" ? status.holiday.nameEn : status.holiday.nameRu;
     case "inClass":
-      return join([s.liveInClass, status.lesson.subject, status.lesson.room, s.leftPhrase(status.minutesLeft)]);
+      return join([s.liveInClass, status.lesson.subject, s.roomName(status.lesson.room), s.leftPhrase(status.minutesLeft)]);
     case "soon":
-      return join([`${s.liveSoon} ${s.untilPhrase(status.minutesUntil)}`, status.lesson.subject, status.lesson.room]);
+      return join([`${s.liveSoon} ${s.untilPhrase(status.minutesUntil)}`, status.lesson.subject, s.roomName(status.lesson.room)]);
     case "window":
       return join([`${s.liveWindow} ${s.span(status.minutes)}`, status.next.subject, status.next.start]);
     case "done":
@@ -40,7 +41,7 @@ export function liveLine(s: Copy, status: LiveStatus): string {
 }
 
 export function teacherFollowLine(s: Copy, today: string, item: TeacherNext): string {
-  const place = [item.lesson.subject, item.groupId, item.lesson.room].filter(Boolean).join(" · ");
+  const place = [item.lesson.subject, item.groupId, s.roomName(item.lesson.room)].filter(Boolean).join(" · ");
   return `${s.whenLabel(item.day, today)} · ${item.lesson.start} · ${place}`;
 }
 
@@ -93,13 +94,15 @@ export default function HomeScreen() {
         </button>
       </div>
 
+      <Announcements s={s} />
+
       <Appear index={0}>
-        <button className="hero" onClick={() => setTab(4)}>
+        <button className="hero" onClick={() => setTab(5)}>
           <div style={{ fontSize: 14, color: "rgba(255,255,255,.82)" }}>{s.greeting(now.getHours())}</div>
           <div className="semibold mt6" style={{ fontSize: 15, lineHeight: "20px" }}>{liveLine(s, status)}</div>
           <div className="bold" style={{ fontSize: 28, lineHeight: 1.2, overflowWrap: "anywhere" }}>{data.name.trim() || s.studentFallback}</div>
           <div className="mt6" style={{ fontSize: 14, color: "rgba(255,255,255,.92)" }}>{group.id}</div>
-          <div className="mt2" style={{ fontSize: 13, color: "rgba(255,255,255,.8)" }}>{faculty.name}</div>
+          <div className="mt2" style={{ fontSize: 13, color: "rgba(255,255,255,.8)" }}>{s.facultyName(faculty.name)}</div>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,.9)", marginTop: 14 }}>{s.formatLongDateCap(today)}</div>
           <div className="row mt12" style={{ flexWrap: "wrap" }}>
             <span className="pill">{s.todayPill(todayLessons.length)}</span>

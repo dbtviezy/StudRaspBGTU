@@ -1,6 +1,8 @@
 import {
   ApiError,
+  assertNotBanned,
   checkRateLimit,
+  cleanText,
   deviceHash,
   ensureSchema,
   isKnownTeacher,
@@ -29,7 +31,7 @@ export async function GET() {
         round(avg(delivery), 1)::float8 AS delivery,
         round(avg(strictness), 1)::float8 AS strictness,
         round(avg(loyalty), 1)::float8 AS loyalty
-      FROM teacher_reviews GROUP BY teacher ORDER BY teacher`;
+      FROM teacher_reviews WHERE NOT hidden GROUP BY teacher ORDER BY teacher`;
     return json({ items: rows.map(toSummary) }, 200, {
       "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
     });
@@ -49,14 +51,6 @@ function deviceOf(body: Record<string, unknown>): string {
   return body.deviceId;
 }
 
-function cleanText(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value !== "string") throw new ApiError(400, "bad_request");
-  const text = value.replace(/\r\n?/g, "\n").trim().replace(/\n{3,}/g, "\n\n");
-  if (Array.from(text).length > 300) throw new ApiError(400, "text_too_long");
-  return text;
-}
-
 export async function POST(request: Request) {
   try {
     const body = await readBody(request);
@@ -68,10 +62,11 @@ export async function POST(request: Request) {
       }
       return value;
     });
-    const text = cleanText(body.text);
+    const text = cleanText(body.text, 300);
     const teacher = teacherOf(body);
     const hash = deviceHash(deviceId);
     await ensureSchema();
+    await assertNotBanned(hash);
     await checkRateLimit(hash);
     const [overall, delivery, strictness, loyalty] = scores;
     await sql()`

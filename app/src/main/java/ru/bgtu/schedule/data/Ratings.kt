@@ -1,11 +1,7 @@
 package ru.bgtu.schedule.data
 
 import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.util.UUID
 
@@ -19,15 +15,21 @@ data class RatingSummary(
 )
 
 data class TeacherReview(
+    val id: Long,
     val overall: Int,
     val delivery: Int,
     val strictness: Int,
     val loyalty: Int,
     val text: String,
     val updatedAt: String,
+    val likes: Int = 0,
+    val dislikes: Int = 0,
+    val myVote: Int = 0,
 )
 
 data class TeacherRatings(val summary: RatingSummary?, val reviews: List<TeacherReview>, val mine: TeacherReview?)
+
+data class VoteResult(val likes: Int, val dislikes: Int, val myVote: Int)
 
 sealed class RatingResult {
     data object Ok : RatingResult()
@@ -35,7 +37,7 @@ sealed class RatingResult {
 }
 
 object RatingApi {
-    const val BASE_URL = "https://studraspbgtu-web.vercel.app"
+    const val BASE_URL = Http.BASE_URL
     const val MAX_TEXT = 300
 
     @Volatile
@@ -53,28 +55,17 @@ object RatingApi {
 
     suspend fun loadSummaries(force: Boolean = false): Map<String, RatingSummary>? {
         if (!force) summaries?.let { return it }
-        val root = request("GET", "/api/ratings") ?: return summaries
-        val items = root.optJSONArray("items") ?: return summaries
-        val next = buildMap {
-            for (index in 0 until items.length()) {
-                val item = items.optJSONObject(index) ?: continue
-                val summary = summaryOf(item) ?: continue
-                put(summary.teacher, summary)
-            }
-        }
+        val reply = Http.call("GET", "/api/ratings")?.takeIf { it.ok } ?: return summaries
+        val next = reply.json()?.optJSONArray("items").mapObjects { summaryOf(it) }.associateBy { it.teacher }
         summaries = next
         return next
     }
 
     suspend fun teacher(context: Context, name: String): TeacherRatings? {
         val query = URLEncoder.encode(name.trim(), "UTF-8")
-        val root = request("GET", "/api/ratings/teacher?name=$query", deviceId = deviceId(context)) ?: return null
-        val reviews = root.optJSONArray("reviews")
-        val list = buildList {
-            if (reviews != null) {
-                for (index in 0 until reviews.length()) reviews.optJSONObject(index)?.let { add(reviewOf(it)) }
-            }
-        }
+        val reply = Http.call("GET", "/api/ratings/teacher?name=$query", headers = mapOf("X-Device-Id" to deviceId(context)))
+        val root = reply?.takeIf { it.ok }?.json() ?: return null
+        val list = root.optJSONArray("reviews").mapObjects { reviewOf(it) }
         val summary = root.optJSONObject("summary")?.let { summaryOf(it) }
         summary?.let { summaries = cachedSummaries() + (it.teacher to it) }
         return TeacherRatings(summary, list, root.optJSONObject("mine")?.let { reviewOf(it) })
@@ -105,46 +96,31 @@ object RatingApi {
         return send("DELETE", body)
     }
 
+    /** [value] is 1 (like), -1 (dislike) or 0 (take the vote back). */
+    suspend fun vote(context: Context, reviewId: Long, value: Int): VoteResult {
+        val body = JSONObject().put("deviceId", deviceId(context)).put("reviewId", reviewId).put("value", value)
+        val root = Http.api("POST", "/api/ratings/vote", body)
+        return VoteResult(root.optInt("likes"), root.optInt("dislikes"), root.optInt("myVote"))
+    }
+
+    suspend fun report(context: Context, kind: String, target: Long, reason: String, token: String? = null) {
+        val body = JSONObject()
+            .put("deviceId", deviceId(context))
+            .put("kind", kind)
+            .put("target", target)
+            .put("reason", reason.trim().take(200))
+        Http.api("POST", "/api/reports", body, token?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty())
+    }
+
     private suspend fun send(method: String, body: JSONObject): RatingResult {
-        val response = exchange(method, "/api/ratings", body, null) ?: return RatingResult.Failed("offline")
-        return if (response.first in 200..299) {
+        val response = Http.call(method, "/api/ratings", body.toString()) ?: return RatingResult.Failed("offline")
+        return if (response.ok) {
             summaries = null
             RatingResult.Ok
         } else {
-            val code = runCatching { JSONObject(response.second).optString("error") }.getOrNull().orEmpty()
-            RatingResult.Failed(code.ifBlank { "http_${response.first}" })
+            RatingResult.Failed(response.errorCode())
         }
     }
-
-    private suspend fun request(method: String, path: String, deviceId: String? = null): JSONObject? {
-        val response = exchange(method, path, null, deviceId) ?: return null
-        if (response.first !in 200..299) return null
-        return runCatching { JSONObject(response.second) }.getOrNull()
-    }
-
-    private suspend fun exchange(method: String, path: String, body: JSONObject?, deviceId: String?): Pair<Int, String>? =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val connection = URL(BASE_URL + path).openConnection() as HttpURLConnection
-                try {
-                    connection.requestMethod = method
-                    connection.connectTimeout = 8000
-                    connection.readTimeout = 10000
-                    connection.setRequestProperty("Accept", "application/json")
-                    deviceId?.let { connection.setRequestProperty("X-Device-Id", it) }
-                    if (body != null) {
-                        connection.doOutput = true
-                        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                        connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                    }
-                    val code = connection.responseCode
-                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-                    code to (stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty())
-                } finally {
-                    connection.disconnect()
-                }
-            }.getOrNull()
-        }
 
     private fun summaryOf(item: JSONObject): RatingSummary? {
         val teacher = item.optString("teacher").trim()
@@ -160,11 +136,15 @@ object RatingApi {
     }
 
     private fun reviewOf(item: JSONObject) = TeacherReview(
+        id = item.optLong("id"),
         overall = item.optInt("overall"),
         delivery = item.optInt("delivery"),
         strictness = item.optInt("strictness"),
         loyalty = item.optInt("loyalty"),
         text = item.optString("text"),
         updatedAt = item.optString("updatedAt"),
+        likes = item.optInt("likes"),
+        dislikes = item.optInt("dislikes"),
+        myVote = item.optInt("myVote"),
     )
 }

@@ -69,10 +69,15 @@ val BrandBlue = Color(0xFF2A56F6)
 val Teal = Color(0xFF12998A)
 val Amber = Color(0xFFE39B2D)
 val Violet = Color(0xFF6D5BD0)
+val Red = Color(0xFFE15B64)
+val RedSoft = Color(0x1AE15B64)
+val StarYellow = Color(0xFFF5B301)
 
 private val LocalPalette = staticCompositionLocalOf { LightPalette }
 
 val LocalBottomInset = staticCompositionLocalOf { 0.dp }
+
+val LocalBundle = staticCompositionLocalOf<ru.bgtu.schedule.data.ScheduleBundle?> { null }
 
 val Bg: Color @Composable get() = LocalPalette.current.bg
 val Blue: Color @Composable get() = LocalPalette.current.blue
@@ -139,6 +144,7 @@ fun BgtuTheme(dark: Boolean, lightStatusIcons: Boolean = false, content: @Compos
                 headlineMedium = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold, color = palette.ink, letterSpacing = (-0.4).sp),
                 titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = palette.ink),
                 titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = palette.ink),
+                bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, color = palette.ink),
                 bodyMedium = TextStyle(fontSize = 14.sp, color = palette.ink),
                 labelMedium = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = palette.muted),
             ),

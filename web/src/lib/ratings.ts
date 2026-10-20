@@ -14,6 +14,11 @@ export interface Summary {
 }
 
 export interface Review {
+  id: number;
+  likes: number;
+  dislikes: number;
+  /** 1, -1 or 0 — this device's vote; absent on the device's own review. */
+  myVote?: number;
   overall: number;
   delivery: number;
   strictness: number;
@@ -135,6 +140,22 @@ export async function saveReview(teacher: string, scores: Scores, text: string):
   });
   updateSummary(teacher.trim(), body.summary);
   return body.summary;
+}
+
+export async function voteReview(reviewId: number, value: number): Promise<{ likes: number; dislikes: number; myVote: number }> {
+  return call("/api/ratings/vote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: deviceId(), reviewId, value }),
+  });
+}
+
+export async function reportReview(reviewId: number, reason: string): Promise<void> {
+  await call("/api/reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: deviceId(), kind: "review", target: reviewId, reason }),
+  });
 }
 
 export async function deleteReview(teacher: string): Promise<Summary | null> {

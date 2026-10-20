@@ -71,7 +71,7 @@ export function LessonChooser({ onPick, onClose }: { onPick: (lesson: Lesson) =>
         {shown.map((lesson) => (
           <button key={lesson.key} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 4px", borderBottom: "1px solid var(--line)" }} onClick={() => onPick(lesson)}>
             <div className="small">{lessonLabelOf(s, lesson)}</div>
-            <div className="muted xsmall">{[s.lessonType(lesson.type), lesson.room, s.weekBadge(lesson.week)].filter(Boolean).join(" · ")}</div>
+            <div className="muted xsmall">{[s.lessonType(lesson.type), s.roomName(lesson.room), s.weekBadge(lesson.week)].filter(Boolean).join(" · ")}</div>
           </button>
         ))}
         {shown.length === 0 && <div className="muted small" style={{ padding: 8 }}>{s.nothingFound}</div>}

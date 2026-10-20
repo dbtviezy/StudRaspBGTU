@@ -1,4 +1,4 @@
-const VERSION = "studrasp-v1.1-1";
+const VERSION = "studrasp-v1.2-1";
 const SHELL = `${VERSION}-shell`;
 const STATIC = `${VERSION}-static`;
 const SHELL_URLS = [
@@ -73,6 +73,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
+  if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/auth/")) return;
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(networkFirst(request, `${VERSION}-api`));
     return;

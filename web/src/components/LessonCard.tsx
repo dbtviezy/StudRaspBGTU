@@ -40,7 +40,7 @@ export function LessonCard({
   const extra = [note, subjectNote].filter((t) => t.trim()).join("\n");
   const hasFile = Object.values(data.fileTags).some((keys) => keys.includes(lesson.key));
   const hasTask = data.todos.some((t) => t.lessonKey === lesson.key && !t.done);
-  const meta = [s.lessonType(lesson.type), lesson.room].filter(Boolean).join(" · ");
+  const meta = [s.lessonType(lesson.type), s.roomName(lesson.room)].filter(Boolean).join(" · ");
   const pair = pairNumber(lesson.start);
   return (
     <button type="button" className={`card lesson${missed ? " missed" : ""}`} {...press}>

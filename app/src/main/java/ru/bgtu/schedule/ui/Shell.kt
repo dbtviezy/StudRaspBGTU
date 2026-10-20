@@ -28,7 +28,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
@@ -39,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Outline
@@ -71,6 +74,9 @@ import androidx.compose.foundation.layout.only
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import ru.bgtu.schedule.data.Account
+import ru.bgtu.schedule.data.ApiFailure
+import ru.bgtu.schedule.data.ChatStore
 import ru.bgtu.schedule.data.Faculty
 import ru.bgtu.schedule.data.Group
 import ru.bgtu.schedule.data.Lesson
@@ -92,6 +98,7 @@ private class ShellUi {
     var notesVersion by mutableIntStateOf(0)
     var tasks by mutableStateOf(false)
     var tasksVersion by mutableIntStateOf(0)
+    var admin by mutableStateOf(false)
 }
 
 private data class ThemeReveal(val toDark: Boolean, val origin: Offset)
@@ -136,8 +143,9 @@ fun BgtuApp() {
     var rootInWindow by remember { mutableStateOf(Offset.Zero) }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
     val shellUi = remember { ShellUi() }
+    var attempt by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(attempt) {
         val started = System.currentTimeMillis()
         val loaded = withContext(Dispatchers.IO) {
             runCatching { ScheduleRepository.load(context.applicationContext) }.getOrNull()
@@ -239,6 +247,11 @@ fun BgtuApp() {
             },
             onDark = ::beginTheme,
             onLanguage = ::applyLanguage,
+            onRetry = {
+                failed = false
+                splash = true
+                attempt++
+            },
         )
         val current = reveal
         if (current != null) {
@@ -336,14 +349,15 @@ private fun AppLayer(
     onName: (String) -> Unit,
     onDark: (Boolean, Offset) -> Unit,
     onLanguage: (String) -> Unit,
+    onRetry: () -> Unit = {},
 ) {
-    CompositionLocalProvider(LocalCopy provides copyOf(lang)) {
+    CompositionLocalProvider(LocalCopy provides copyOf(lang), LocalBundle provides bundle) {
     BgtuTheme(dark = dark, lightStatusIcons = splash) {
         val data = bundle
         val copy = LocalCopy.current
         when {
             splash -> SplashScreen()
-            failed -> InfoState(copy.loadFailedTitle, copy.loadFailedText)
+            failed -> InfoState(copy.loadFailedTitle, copy.loadFailedText, onRetry)
             data == null -> SplashScreen()
             !onboarded -> OnboardingScreen(
                 lang = lang,
@@ -401,7 +415,7 @@ private fun AppLayer(
 }
 
 @Composable
-private fun InfoState(title: String, text: String) {
+private fun InfoState(title: String, text: String, onRetry: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().background(Bg).padding(28.dp),
         verticalArrangement = Arrangement.Center,
@@ -409,6 +423,8 @@ private fun InfoState(title: String, text: String) {
         Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 24.sp)
         Spacer(Modifier.height(8.dp))
         Text(text, color = Muted, fontSize = 15.sp)
+        Spacer(Modifier.height(20.dp))
+        PrimaryButton(S.retry, onClick = onRetry)
     }
 }
 
@@ -444,13 +460,42 @@ private fun MainShell(
     }
     val date = remember(shellUi.selectedDate) { LocalDate.parse(shellUi.selectedDate) }
     val tasksTick = shellUi.tasksVersion
+    val account by Account.state.collectAsState()
+    val chatVersion by ChatStore.version.collectAsState()
+    val unread = remember(chatVersion, account.signedIn) { if (account.signedIn) ChatStore.unreadTotal() else 0 }
+    val copy = S
+
+    if (windows) {
+        LaunchedEffect(Unit) { Account.refresh() }
+        LaunchedEffect(Unit) {
+            Account.pendingCode.collect { code ->
+                if (code == null) return@collect
+                Account.pendingCode.value = null
+                try {
+                    Account.exchange(code)
+                    Toasts.show(copy.more.signedInToast)
+                    shellUi.tab = 5
+                } catch (failure: ApiFailure) {
+                    Toasts.show(copy.errorText(failure.code))
+                }
+            }
+        }
+        LaunchedEffect(account.signedIn) {
+            if (!account.signedIn) return@LaunchedEffect
+            while (true) {
+                ChatStore.flush()
+                runCatching { ChatStore.refreshChats() }
+                delay(60_000)
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Bg)) {
         Scaffold(
             containerColor = Bg,
             contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
             bottomBar = {
-                AppBar(shellUi.tab) { shellUi.tab = it }
+                AppBar(shellUi.tab, unread > 0) { shellUi.tab = it }
             },
         ) { padding ->
             AnimatedContent(
@@ -472,7 +517,7 @@ private fun MainShell(
                         onDark = onDark,
                         noteOf = noteOf,
                         onNotes = { shellUi.reminders = true },
-                        onOpenProfile = { shellUi.tab = 4 },
+                        onOpenProfile = { shellUi.tab = 5 },
                         lang = lang,
                         onLanguage = onLanguage,
                         tasksTick = tasksTick,
@@ -516,6 +561,7 @@ private fun MainShell(
                         noteOf = noteOf,
                         tasksTick = tasksTick,
                     )
+                    4 -> ChatScreen(group.id, studentName)
                     else -> ProfileScreen(
                         bundle, faculty, group, studentName, dark, onDark, onName, onChangeGroup, onReset,
                         onOpenFiles = { shellUi.files = true },
@@ -532,18 +578,31 @@ private fun MainShell(
                             ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(context)
                             ru.bgtu.schedule.widget.ScheduleWidget.refresh(context)
                         },
+                        onOpenChats = { shellUi.tab = 4 },
+                        onOpenAdmin = { shellUi.admin = true },
                     )
                 }
             }
         }
 
         if (windows) {
+            if (shellUi.admin) {
+                AdminScreen(onClose = { shellUi.admin = false })
+            }
             AnimatedVisibility(
                 visible = shellUi.reminders,
                 enter = fadeIn(tween(180)) + slideInVertically(tween(280)) { it / 8 },
                 exit = fadeOut(tween(160)) + slideOutVertically(tween(220)) { it / 8 },
             ) {
-                NotesOverlay(bundle, group) { shellUi.reminders = false }
+                NotesOverlay(
+                    bundle,
+                    group,
+                    onClose = { shellUi.reminders = false },
+                    onLesson = { lesson, day ->
+                        shellUi.opened = lesson
+                        shellUi.openedDate = day
+                    },
+                )
             }
             if (shellUi.files) {
                 FilesOverlay(group) { shellUi.files = false }
@@ -577,6 +636,7 @@ private fun MainShell(
                     onClose = { shellUi.opened = null },
                 )
             }
+            ToastHost()
         }
     }
 }
@@ -634,19 +694,24 @@ internal fun LanguageMark(lang: String?, onLanguage: (String) -> Unit) {
 }
 
 @Composable
-private fun AppBar(current: Int, onSelect: (Int) -> Unit) {
+private fun AppBar(current: Int, chatDot: Boolean, onSelect: (Int) -> Unit) {
     val copy = S
     val tabs = listOf(
         TabSpec(copy.tabHome, Icons.Filled.Home),
         TabSpec(copy.tabSchedule, Icons.Filled.ViewDay),
         TabSpec(copy.tabGroups, Icons.Filled.Groups),
-        TabSpec(copy.tabCalendar, Icons.Filled.CalendarMonth),
+        TabSpec(copy.tabCalendar, Icons.Filled.Event),
+        TabSpec(copy.more.tabChat, Icons.AutoMirrored.Filled.Chat),
         TabSpec(copy.tabProfile, Icons.Filled.Person),
     )
+    val hairline = Line
     Row(
         Modifier
             .fillMaxWidth()
             .background(Card)
+            .drawBehind {
+                drawLine(hairline, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1.dp.toPx())
+            }
             .padding(bottom = LocalBottomInset.current)
             .padding(horizontal = 2.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -673,6 +738,16 @@ private fun AppBar(current: Int, onSelect: (Int) -> Unit) {
                         tint = if (selected) Blue else Muted,
                         modifier = Modifier.size(22.dp),
                     )
+                    if (index == 4 && chatDot) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 5.dp, end = 5.dp)
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Red),
+                        )
+                    }
                 }
                 Text(
                     tab.label,

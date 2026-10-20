@@ -9,6 +9,7 @@ import { actions, setState, sortedTodos } from "@/lib/store";
 import { originOf, switchTheme } from "@/lib/theme";
 import { useShell } from "../context";
 import { Icon, TelegramIcon } from "../Icons";
+import { AccountCard } from "../overlays/Account";
 import CropPhoto from "../overlays/CropPhoto";
 import { Alert, Detail, LanguageMark, Switch } from "../ui";
 
@@ -132,13 +133,15 @@ export default function ProfileScreen() {
 
       <div className="card">
         <Detail label={s.group} value={group.id} />
-        <Detail label={s.faculty} value={faculty.name} />
+        <Detail label={s.faculty} value={s.facultyName(faculty.name)} />
         <Detail label={s.level} value={s.levelName(group.level)} />
         {group.year != null && <Detail label={s.cohort} value={s.cohortValue(group.year)} />}
         <Detail label={s.period} value={s.periodLabel(bundle.periodLabel) || "—"} />
         <Detail label={s.form} value={s.fullTimeForm} />
         <button className="btn mt12" onClick={pickGroup}>{s.changeGroup}</button>
       </div>
+
+      <AccountCard />
 
       <Card title={s.secondGroup} hint={s.secondGroupHint}>
         {friend && <div className="semibold mt8">{`${friend.group.id} · ${friend.faculty.short}`}</div>}
@@ -173,17 +176,6 @@ export default function ProfileScreen() {
           </span>
         </div>
       </button>
-
-      <Card title={s.weekHelpTitle}>
-        <div className="blue semibold small mt6">{s.weekNow(info.number, info.even)}</div>
-        <div className="small mt6" style={{ lineHeight: 1.45 }}>{s.weekHelp}</div>
-        <div className="muted xsmall mt8">{s.fetchedLine}</div>
-        {bundle.source && (
-          <a className="tbtn flush mt4" style={{ display: "inline-block" }} href={bundle.source} target="_blank" rel="noreferrer">
-            {s.openSite}
-          </a>
-        )}
-      </Card>
 
       <Card title={s.absences} hint={subjects.length === 0 ? s.absencesEmpty : undefined}>
         {subjects.map((subject) => {
@@ -269,6 +261,17 @@ export default function ProfileScreen() {
       <button className="btn" style={{ background: "transparent", color: "var(--red)", boxShadow: "inset 0 0 0 1px var(--line)" }} onClick={() => setResetting(true)}>
         {s.resetData}
       </button>
+
+      <Card title={s.weekHelpTitle}>
+        <div className="blue semibold small mt6">{s.weekNow(info.number, info.even)}</div>
+        <div className="small mt6" style={{ lineHeight: 1.45 }}>{s.weekHelp}</div>
+        <div className="muted xsmall mt8">{s.fetchedLine}</div>
+        {bundle.source && (
+          <a className="tbtn flush mt4" style={{ display: "inline-block" }} href={bundle.source} target="_blank" rel="noreferrer">
+            {s.openSite}
+          </a>
+        )}
+      </Card>
 
       <div className="muted xsmall" style={{ textAlign: "center" }}>{`${s.appName} ${APP_VERSION}`}</div>
 
