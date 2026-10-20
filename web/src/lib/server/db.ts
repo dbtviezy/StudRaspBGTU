@@ -106,6 +106,17 @@ export function ensureSchema(): Promise<void> {
       target text NOT NULL DEFAULT '',
       created_at timestamptz NOT NULL DEFAULT now()
     )`;
+    await q`ALTER TABLE admin_log ADD COLUMN IF NOT EXISTS detail varchar(300) NOT NULL DEFAULT ''`;
+    await q`CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint text PRIMARY KEY,
+      user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+      p256dh text NOT NULL,
+      auth text NOT NULL,
+      hide_profanity boolean NOT NULL DEFAULT false,
+      lang varchar(2) NOT NULL DEFAULT 'ru',
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`;
+    await q`CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id)`;
   })().catch((error) => {
     ready = null;
     throw error;

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { isoOf, type ISODate } from "@/lib/dates";
-import { copyOf, type Copy } from "@/lib/i18n";
+import { APP_VERSION, copyOf, type Copy } from "@/lib/i18n";
 import { type Bundle, changeId, type Entry, type Filters, type Lesson, loadBundle } from "@/lib/schedule";
 import { type Data, getState, resetData, setState, useStore } from "@/lib/store";
 import { applyThemeAttr } from "@/lib/theme";
@@ -21,12 +21,14 @@ import ProfileScreen from "./screens/Profile";
 import ChatScreen from "./screens/Chat";
 import { forgetAccount, useAccount, useAccountRefresh } from "@/lib/account";
 import { cachedChats, clearChatCache, useChatVersion, useOutboxPump } from "@/lib/chat";
+import { disablePush } from "@/lib/push";
 import LessonDialog from "./overlays/LessonDialog";
 import TeacherDialog from "./overlays/TeacherDialog";
 import TasksOverlay, { TodoEditor } from "./overlays/Tasks";
 import FilesOverlay from "./overlays/Files";
 import NotesOverlay from "./overlays/Notes";
 import InstallHint from "./InstallHint";
+import WhatsNew from "./overlays/WhatsNew";
 
 function useServiceWorker() {
   useEffect(() => {
@@ -64,6 +66,14 @@ export default function App() {
 
   useEffect(() => applyThemeAttr(data.dark), [data.dark]);
   useEffect(() => {
+    if (!data.systemTheme) return;
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setState({ dark: query.matches });
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, [data.systemTheme]);
+  useEffect(() => {
     document.documentElement.lang = data.lang ?? "ru";
     document.title = s.appName;
   }, [data.lang, s.appName]);
@@ -96,7 +106,7 @@ export default function App() {
         lang={data.lang}
         dark={data.dark}
         onLanguage={setLanguage}
-        onStart={() => setState({ onboarded: true, lang: data.lang ?? "ru" })}
+        onStart={() => setState({ onboarded: true, lang: data.lang ?? "ru", seenVersion: APP_VERSION })}
       />
     );
   }
@@ -142,6 +152,7 @@ export default function App() {
       pickGroup={() => setPicking(true)}
       pickFriend={() => setPickingFriend(true)}
       onReset={() => {
+        disablePush();
         resetData();
         forgetAccount();
         clearChatCache();
@@ -175,7 +186,7 @@ const TABS: { icon: IconName; label: (s: Copy) => string }[] = [
 function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend, onReset }: MainProps) {
   const now = useNow();
   const today = isoOf(now);
-  const [tab, setTabState] = useState(0);
+  const [tab, setTabState] = useState(() => (new URLSearchParams(window.location.search).has("chat") ? 4 : 0));
   const [back, setBack] = useState(false);
   // null follows "today", so the selection rolls over at midnight on its own.
   const [pickedDate, setPickedDate] = useState<ISODate | null>(null);
@@ -268,6 +279,7 @@ function MainShell({ bundle, entry, s, data, setLanguage, pickGroup, pickFriend,
       {opened && <LessonDialog key={`${opened.date}|${opened.lesson.key}`} lesson={opened.lesson} date={opened.date} onClose={() => setOpened(null)} />}
       {todo && <TodoEditor preset={todo} onClose={() => setTodo(null)} />}
       <InstallHint s={s} />
+      {data.seenVersion !== APP_VERSION && <WhatsNew s={s} onClose={() => setState({ seenVersion: APP_VERSION })} />}
       {toastText && <div className="toast" role="status">{toastText}</div>}
     </ShellContext.Provider>
   );

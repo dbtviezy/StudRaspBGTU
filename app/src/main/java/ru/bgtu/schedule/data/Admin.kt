@@ -67,6 +67,8 @@ data class AdminBan(
     val until: String?,
 )
 
+data class AdminLogEntry(val id: Long, val action: String, val target: String, val detail: String, val createdAt: String?)
+
 data class Announcement(val id: Long, val text: String, val createdAt: String?, val until: String? = null, val active: Boolean = true)
 
 data class AdminUser(
@@ -222,6 +224,16 @@ object AdminApi {
             createdAt = item.stringOrNull("createdAt"),
             seenAt = item.stringOrNull("seenAt"),
             banned = item.optBoolean("banned"),
+        )
+    }
+
+    suspend fun log(): List<AdminLogEntry> = view("log").optJSONArray("items").mapObjects { item ->
+        AdminLogEntry(
+            id = item.optLong("id"),
+            action = item.optString("action"),
+            target = item.optString("target"),
+            detail = item.optString("detail"),
+            createdAt = item.stringOrNull("createdAt"),
         )
     }
 }

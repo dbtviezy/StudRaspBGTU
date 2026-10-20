@@ -35,11 +35,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -152,6 +153,12 @@ private fun OnlineChats(groupId: String) {
     var form by remember { mutableStateOf<ChatForm?>(null) }
     var openedId by rememberSaveable { mutableStateOf<String?>(null) }
 
+    LaunchedEffect(AppSignals.openChat) {
+        AppSignals.openChat?.let {
+            openedId = it
+            AppSignals.openChat = null
+        }
+    }
     LaunchedEffect(Unit) {
         enabled = try {
             Account.config().chat
@@ -254,7 +261,7 @@ private fun ChatRow(chat: ChatInfo, onOpen: () -> Unit) {
     val title = s.chatTitle(chat)
     val preview = when {
         !chat.accepted -> "${chat.peerName.orEmpty()} ${s.more.chatRequest}"
-        chat.lastBody != null -> (if (!chat.isDirect && chat.lastAuthor != null) "${chat.lastAuthor}: " else "") + chat.lastBody
+        chat.lastBody != null -> (if (!chat.isDirect && chat.lastAuthor != null) "${chat.lastAuthor}: " else "") + censor(chat.lastBody)
         else -> s.more.noMessages
     }
     SoftCard(onClick = onOpen) {
@@ -402,10 +409,13 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
     var banning by remember { mutableStateOf<ChatMessage?>(null) }
     var leaving by remember { mutableStateOf(false) }
     var invite by remember { mutableStateOf(false) }
+    var actions by remember { mutableStateOf(false) }
+    var sheet by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val lastId = messages.maxOfOrNull { it.id ?: 0L } ?: 0L
 
     LaunchedEffect(chatId) {
+        ru.bgtu.schedule.notify.ChatNotify.cancelFor(context, chatId)
         try {
             ChatStore.resyncMessages(chatId)
             offline = false
@@ -464,14 +474,20 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
                     Text(chat?.let { s.chatTitle(it) }.orEmpty(), color = Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(subtitle, color = Muted, fontSize = 12.sp, maxLines = 1)
                 }
-                if (chat != null && !chat.isDirect && chat.inviteCode != null) {
-                    IconButton(onClick = { invite = true }) {
-                        Icon(Icons.Filled.PersonAdd, contentDescription = s.more.inviteCode, tint = Ink)
+                if (chat != null && !chat.isDirect) {
+                    IconButton(onClick = { sheet = "polls" }) {
+                        Icon(Icons.Filled.Poll, contentDescription = s.more.polls, tint = Ink)
+                    }
+                    IconButton(onClick = { sheet = "tasks" }) {
+                        Icon(Icons.Filled.Checklist, contentDescription = s.more.groupTasks, tint = Ink)
                     }
                 }
-                IconButton(onClick = { leaving = true }) {
-                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = s.more.leaveChat, tint = Ink)
+                IconButton(onClick = { actions = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = s.more.moreActions, tint = Ink)
                 }
+            }
+            if (chat != null && !chat.isDirect) {
+                PinnedBar(chat, onUnpin = if (chat.isStaff) ({ guarded { ChatStore.pin(chatId, null) } }) else null)
             }
             if (offline) OfflineBar()
             LazyColumn(
@@ -581,6 +597,12 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
                     menu = null
                 }
             }
+            if (sent && chat?.isStaff == true) {
+                MenuItem(s.more.pin) {
+                    menu = null
+                    guarded { ChatStore.pin(chatId, message.id) }
+                }
+            }
             if (sent && own) {
                 MenuItem(s.delete, danger = true) {
                     menu = null
@@ -625,6 +647,22 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
         BanSheet(withDelete = true, onDismiss = { banning = null }) { days, reason, extra ->
             AdminApi.action("ban.message", mapOf("id" to message.id, "days" to days, "reason" to reason, "deleteMessage" to extra))
             if (extra) message.id?.let { ChatStore.forgetMessage(chatId, it) }
+        }
+    }
+    if (actions) {
+        BottomSheet(onDismiss = { actions = false }) {
+            if (chat != null && !chat.isDirect) {
+                MenuItem(s.more.members) { sheet = "members"; actions = false }
+                if (chat.inviteCode != null) MenuItem(s.more.inviteCode) { invite = true; actions = false }
+            }
+            MenuItem(s.more.leaveChat, danger = true) { leaving = true; actions = false }
+        }
+    }
+    if (chat != null) {
+        when (sheet) {
+            "members" -> MembersSheet(chat) { sheet = null }
+            "polls" -> PollsSheet(chat) { sheet = null }
+            "tasks" -> GroupTasksSheet(chat) { sheet = null }
         }
     }
     if (invite && chat != null) InviteSheet(chat) { invite = false }
@@ -699,7 +737,7 @@ private fun Bubble(message: ChatMessage, mine: Boolean, showAuthor: Boolean, onM
             if (showAuthor && !mine) {
                 Text(message.author, color = Blue, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             }
-            Text(message.body, color = ink, fontSize = 15.sp, lineHeight = 20.sp)
+            Text(if (mine) message.body else censor(message.body), color = ink, fontSize = 15.sp, lineHeight = 20.sp)
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.End).padding(top = 2.dp)) {
                 if (message.pending) {
                     Icon(Icons.Filled.Schedule, contentDescription = null, tint = ink.copy(alpha = 0.7f), modifier = Modifier.size(11.dp))

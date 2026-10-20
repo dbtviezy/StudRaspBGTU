@@ -186,6 +186,156 @@ class MoreCopy(private val en: Boolean) {
     val statChats = t("Чатов", "Chats")
     val statMessages = t("Сообщений", "Messages")
     val moderation = t("Модерация", "Moderation")
+
+    val settingsTitle = t("Настройки", "Settings")
+    val themeSystem = t("Тема как в системе", "Match system theme")
+    val themeSystemHint = t("Светлая или тёмная — как на телефоне", "Light or dark, same as your device")
+    val hideProfanity = t("Скрывать мат", "Hide swear words")
+    val hideProfanityHint = t("В чатах и отзывах плохие слова заменятся звёздочками", "Swear words in chats and reviews are replaced with asterisks")
+    val chatNotify = t("Уведомления о сообщениях", "Message notifications")
+    val chatNotifyHint = t("Новые сообщения проверяются примерно раз в 15 минут", "New messages are checked about every 15 minutes")
+    val chatNotifySignIn = t("Сначала войдите в аккаунт", "Sign in first")
+    val ongoingLesson = t("Текущая пара в шторке", "Current class in notifications")
+    val ongoingLessonHint = t(
+        "Во время пары в уведомлениях видно предмет, аудиторию и сколько осталось",
+        "During a class the notification shows the subject, room and time left",
+    )
+    val channelMessages = t("Сообщения", "Messages")
+    val channelOngoing = t("Текущая пара", "Current class")
+    fun newMessages(count: Int): String = if (en) {
+        if (count == 1) "1 new message" else "$count new messages"
+    } else {
+        val word = when {
+            count % 100 in 11..14 -> "новых сообщений"
+            count % 10 == 1 -> "новое сообщение"
+            count % 10 in 2..4 -> "новых сообщения"
+            else -> "новых сообщений"
+        }
+        "$count $word"
+    }
+    fun untilTime(time: String): String = t("до $time", "until $time")
+
+    val calendarSubTitle = t("Расписание в календаре", "Schedule in your calendar")
+    val calendarSubHint = t(
+        "Подписка обновляется сама, если расписание изменится. Заметки и скрытые пары туда не попадут.",
+        "The subscription updates itself when the schedule changes. Notes and hidden classes are not included.",
+    )
+    val calendarGoogle = t("Google Календарь", "Google Calendar")
+    val calendarOther = t("Другой календарь", "Other calendar")
+    val copyLink = t("Скопировать ссылку", "Copy link")
+    val linkCopied = t("Ссылка скопирована", "Link copied")
+
+    val whatsNewLink = t("Что нового", "What's new")
+    val whatsNewOk = t("Понятно", "Got it")
+    fun whatsNewTitle(version: String) = t("Что нового в $version", "What's new in $version")
+    val whatsNewItems: List<Pair<String, String>> = if (en) {
+        listOf(
+            "Chats" to "Group chat by invite code and direct messages. Messages written offline are sent later. Phones nearby can chat even without the internet.",
+            "Pins, polls and group tasks" to "The class rep and helpers can pin a message, run a poll and post deadlines for the whole group.",
+            "Account" to "Sign in with a login and password, Telegram or Google — needed only for chats.",
+            "Reviews" to "Like or dislike other people's reviews and report rule-breakers.",
+            "Where is the teacher" to "The teacher page shows their current class and room, or the next one.",
+            "Notifications" to "Message notifications and the current class with a countdown in the notification shade.",
+            "Calendar and widget" to "Subscribe to your schedule in Google Calendar and add the new week widget.",
+            "Settings" to "Theme that follows the system, a swear-word filter and full English.",
+        )
+    } else {
+        listOf(
+            "Чаты" to "Чат группы по коду приглашения и личные сообщения. Написанное без сети отправится позже. Рядом стоящие телефоны могут переписываться даже без интернета.",
+            "Закреп, опросы и дела группы" to "Староста и помощники могут закрепить сообщение, провести опрос и выложить дедлайны для всей группы.",
+            "Аккаунт" to "Вход по логину и паролю, через Telegram или Google — нужен только для чатов.",
+            "Отзывы" to "Лайки и дизлайки к чужим отзывам и жалобы на нарушителей.",
+            "Где преподаватель" to "На странице преподавателя видно, на какой он паре и в какой аудитории, или когда следующая.",
+            "Уведомления" to "Уведомления о сообщениях и текущая пара с обратным отсчётом в шторке.",
+            "Календарь и виджет" to "Подписка на расписание в Google Календаре и новый виджет на всю неделю.",
+            "Настройки" to "Тема как в системе, фильтр мата и полный английский перевод.",
+        )
+    }
+
+    fun updateTitle(version: String) = t("Вышла версия $version", "Version $version is out")
+    val updateText = t("Скачайте и установите поверх — все данные сохранятся.", "Download and install it over this one — your data stays.")
+    val updateDownload = t("Скачать", "Download")
+    val updateLater = t("Позже", "Later")
+
+    val whereTitle = t("Где сейчас", "Where now")
+    val whereInClass = t("Сейчас на паре", "In class now")
+    val whereFree = t("Сейчас без пар", "No class right now")
+    val whereNext = t("Ближайшая пара", "Next class")
+    val whereNone = t("В ближайшие две недели пар нет", "No classes in the next two weeks")
+    fun groupsLine(groups: List<String>) = (if (groups.size == 1) t("Группа ", "Group ") else t("Группы ", "Groups ")) + groups.joinToString(", ")
+
+    val moreActions = t("Ещё", "More")
+    val pinned = t("Закреплено", "Pinned")
+    val pin = t("Закрепить", "Pin")
+    val unpin = t("Открепить", "Unpin")
+    val members = t("Участники", "Members")
+    val roleOwner = t("староста", "class rep")
+    val roleHelper = t("помощник", "helper")
+    val makeHelper = t("Сделать помощником", "Make helper")
+    val removeHelper = t("Убрать из помощников", "Remove helper")
+    val helpersHint = t(
+        "Староста и помощники могут закреплять сообщения, создавать опросы и дела группы.",
+        "The class rep and helpers can pin messages and create polls and group tasks.",
+    )
+    val polls = t("Опросы", "Polls")
+    val newPoll = t("Новый опрос", "New poll")
+    val pollQuestion = t("Вопрос", "Question")
+    fun pollOption(n: Int) = t("Вариант $n", "Option $n")
+    val addOption = t("Ещё вариант", "Add option")
+    val pollMultiple = t("Можно выбрать несколько", "Allow several answers")
+    val pollCreate = t("Создать опрос", "Create poll")
+    val pollNeedOptions = t("Нужен вопрос и хотя бы два варианта", "Add a question and at least two options")
+    val pollClose = t("Завершить", "End poll")
+    val pollClosed = t("Опрос завершён", "Poll ended")
+    val pollDelete = t("Удалить опрос", "Delete poll")
+    val vote = t("Голосовать", "Vote")
+    val noPolls = t("Опросов пока нет", "No polls yet")
+    fun pollVotes(count: Int): String = if (en) {
+        if (count == 1) "1 vote" else "$count votes"
+    } else {
+        val word = when {
+            count % 100 in 11..14 -> "голосов"
+            count % 10 == 1 -> "голос"
+            count % 10 in 2..4 -> "голоса"
+            else -> "голосов"
+        }
+        "$count $word"
+    }
+    val groupTasks = t("Дела группы", "Group tasks")
+    val groupTasksHint = t(
+        "Дедлайны от старосты. Добавьте дело к себе, чтобы получить напоминание.",
+        "Deadlines from the class rep. Add one to your tasks to get a reminder.",
+    )
+    val newGroupTask = t("Новое дело группы", "New group task")
+    val groupTaskTitle = t("Что сделать", "What to do")
+    val groupTaskNote = t("Подробности (необязательно)", "Details (optional)")
+    val pickDate = t("Срок", "Due date")
+    val pickTime = t("Время", "Time")
+    val noDate = t("Без срока", "No due date")
+    val addToMine = t("В мои дела", "Add to my tasks")
+    val addedToMine = t("Добавлено в ваши дела", "Added to your tasks")
+    val inMine = t("Уже в ваших делах", "Already in your tasks")
+    val noGroupTasks = t("Дел группы пока нет", "No group tasks yet")
+    val add = t("Добавить", "Add")
+    fun fromChat(title: String) = t("Из чата «$title»", "From “$title”")
+
+    val adminLog = t("Журнал", "Log")
+    fun adminAction(action: String): String = when (action) {
+        "review.hide" -> t("Скрыт отзыв", "Review hidden")
+        "review.unhide" -> t("Возвращён отзыв", "Review restored")
+        "review.delete" -> t("Удалён отзыв", "Review deleted")
+        "ban.review" -> t("Бан по отзыву", "Ban for a review")
+        "ban.message" -> t("Бан по сообщению", "Ban for a message")
+        "ban.user" -> t("Бан аккаунта", "Account banned")
+        "ban.remove" -> t("Снят бан", "Ban lifted")
+        "message.delete" -> t("Удалено сообщение", "Message deleted")
+        "report.dismiss" -> t("Отклонена жалоба", "Report dismissed")
+        "report.accept" -> t("Приняты меры по жалобе", "Action taken on a report")
+        "announce.create" -> t("Опубликовано объявление", "Announcement published")
+        "announce.remove" -> t("Снято объявление", "Announcement removed")
+        "user.delete" -> t("Удалён аккаунт", "Account deleted")
+        else -> action
+    }
 }
 
 val MoreRu = MoreCopy(false)

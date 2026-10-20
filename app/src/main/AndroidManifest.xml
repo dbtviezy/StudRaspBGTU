@@ -58,6 +58,13 @@
         <receiver
             android:name=".notify.DeadlineAlarmReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".notify.OngoingLessonReceiver"
+            android:exported="false" />
+        <service
+            android:name=".notify.ChatCheckJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service
             android:name=".widget.LessonWidgetService"
             android:exported="false"
@@ -75,6 +82,24 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/schedule_widget_info" />
+        </receiver>
+        <service
+            android:name=".widget.WeekWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+        <receiver
+            android:name=".widget.WeekWidget"
+            android:exported="true"
+            android:label="@string/widget_week_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/week_widget_info" />
         </receiver>
         <receiver
             android:name=".notify.BootReceiver"

@@ -14,7 +14,8 @@ import {
   useSummaries,
   voteReview,
 } from "@/lib/ratings";
-import { nextTeacherLessons, splitTeachers, teacherHeading } from "@/lib/schedule";
+import { maskIf } from "@/lib/profanity";
+import { nextTeacherLessons, splitTeachers, teacherHeading, teacherWhere } from "@/lib/schedule";
 import { actions } from "@/lib/store";
 import { useShell } from "../context";
 import { Icon } from "../Icons";
@@ -62,8 +63,36 @@ function VoteButton({ on, icon, count, label, onClick }: { on: boolean; icon: "t
   );
 }
 
+function WhereCard({ name }: { name: string }) {
+  const { bundle, s, today, now } = useShell();
+  const where = teacherWhere(bundle, name, today, now);
+  const title = !where ? s.whereNone : where.inClass ? s.whereInClass : s.whereFree;
+  const when = !where
+    ? ""
+    : where.inClass
+      ? `${s.untilTime(where.lesson.end)} · ${s.leftPhrase(where.minutes)}`
+      : where.day === today
+        ? `${s.whereNext}: ${where.lesson.start} · ${s.untilPhrase(where.minutes)}`
+        : `${s.whereNext}: ${s.formatLongDate(where.day)}, ${where.lesson.start}`;
+  return (
+    <div className="card mt12">
+      <div className="muted xsmall semibold">{s.whereTitle.toUpperCase()}</div>
+      <div className={`semibold mt4 ${where?.inClass ? "blue" : ""}`}>{title}</div>
+      {where && (
+        <>
+          <div className="small mt2">{when}</div>
+          <div className="small mt6">
+            {[s.roomName(where.lesson.room), where.lesson.subject].filter(Boolean).join(" · ")}
+          </div>
+          <div className="muted xsmall mt2">{s.groupsLine(where.groups)}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ReviewCard({ review, s, title, own }: { review: Review; s: Copy; title?: string; own?: boolean }) {
-  const { toast } = useShell();
+  const { toast, data } = useShell();
   const [votes, setVotes] = useState({ likes: review.likes ?? 0, dislikes: review.dislikes ?? 0, myVote: review.myVote ?? 0 });
   const [reporting, setReporting] = useState(false);
 
@@ -93,7 +122,7 @@ function ReviewCard({ review, s, title, own }: { review: Review; s: Copy; title?
       <div className="muted xsmall mt2">
         {`${s.delivery} ${review.delivery} · ${s.strictness} ${review.strictness} · ${s.loyalty} ${review.loyalty}`}
       </div>
-      {review.text && <div className="small mt4 pre" style={{ overflowWrap: "anywhere" }}>{review.text}</div>}
+      {review.text && <div className="small mt4 pre" style={{ overflowWrap: "anywhere" }}>{own ? review.text : maskIf(data.hideProfanity, review.text)}</div>}
       {review.id > 0 && (
         <div className="row mt6" style={{ gap: 6 }}>
           {own ? (
@@ -313,6 +342,8 @@ export default function TeacherDialog({ name: raw, onClose }: { name: string; on
           <Icon name={favorite ? "star" : "starBorder"} />
         </button>
       </div>
+
+      <WhereCard name={name} />
 
       {people.map((person) => (
         <RatingCard key={person} name={person} showName={people.length > 1} />

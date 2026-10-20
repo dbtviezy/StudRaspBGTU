@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 
 data class Holiday(val nameRu: String, val nameEn: String)
 
@@ -238,6 +239,37 @@ fun nextTeacherLessons(
             }
     }
     return result
+}
+
+/** The teacher's current class, or the next one if they are free; [groups] lists every group sitting in it. */
+data class TeacherWhere(
+    val inClass: Boolean,
+    val day: LocalDate,
+    val lesson: Lesson,
+    val groups: List<String>,
+    /** Minutes left in the class, or until it starts today; -1 for a later day. */
+    val minutes: Int,
+)
+
+fun teacherWhere(
+    bundle: ScheduleBundle,
+    teacher: String,
+    today: LocalDate,
+    now: LocalTime,
+    semesterStart: LocalDate,
+): TeacherWhere? {
+    val items = nextTeacherLessons(bundle, teacher, today, now, semesterStart, limit = 30)
+    val first = items.firstOrNull() ?: return null
+    val groups = items.filter { it.day == first.day && it.lesson.start == first.lesson.start }.map { it.groupId }.distinct()
+    val start = parseTime(first.lesson.start)
+    val end = parseTime(first.lesson.end)
+    val inClass = first.day == today && start != null && end != null && !now.isBefore(start) && now.isBefore(end)
+    val minutes = when {
+        inClass -> ChronoUnit.MINUTES.between(now, end).toInt().coerceAtLeast(1)
+        first.day == today && start != null -> ChronoUnit.MINUTES.between(now, start).toInt().coerceAtLeast(0)
+        else -> -1
+    }
+    return TeacherWhere(inClass, first.day, first.lesson, groups, minutes)
 }
 
 sealed class LiveStatus {

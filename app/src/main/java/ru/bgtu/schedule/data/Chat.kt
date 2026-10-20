@@ -30,9 +30,40 @@ data class ChatInfo(
     val lastAuthor: String?,
     val lastAt: String?,
     val unread: Int,
+    val pinnedBody: String? = null,
+    val pinnedAuthor: String? = null,
 ) {
     val isDirect: Boolean get() = kind == "dm"
     val isOwner: Boolean get() = role == "owner"
+
+    /** The creator and the helpers they appointed can pin messages, run polls and post group tasks. */
+    val isStaff: Boolean get() = !isDirect && accepted && (role == "owner" || role == "helper")
+}
+
+data class ChatMember(val userId: String, val name: String, val role: String)
+
+data class ChatPoll(
+    val id: Long,
+    val question: String,
+    val options: List<String>,
+    val multiple: Boolean,
+    val closed: Boolean,
+    val author: String,
+    val counts: List<Int>,
+    val mine: List<Int>,
+    val voters: Int,
+)
+
+data class GroupTask(
+    val id: Long,
+    val chatId: String,
+    val title: String,
+    val note: String,
+    val dueDate: String?,
+    val dueTime: String?,
+    val author: String,
+) {
+    val todoId: String get() = "group-$id"
 }
 
 data class ChatMessage(
@@ -314,6 +345,116 @@ object ChatStore {
         emit()
     }
 
+    suspend fun pin(chatId: String, messageId: Long?) {
+        rpc("pin_message", JSONObject().put("p_chat", chatId).put("p_message", messageId ?: JSONObject.NULL))
+        refreshChats()
+    }
+
+    suspend fun members(chatId: String): List<ChatMember> =
+        rest("GET", "chat_members?chat_id=eq.$chatId&accepted=eq.true&select=user_id,name,role&order=joined_at.asc")
+            .array().mapObjects { row ->
+                ChatMember(row.optString("user_id"), row.optString("name"), roleOf(row.optString("role")))
+            }
+
+    suspend fun setRole(chatId: String, userId: String, role: String) {
+        rpc("set_member_role", JSONObject().put("p_chat", chatId).put("p_user", userId).put("p_role", role))
+    }
+
+    fun cachedPolls(chatId: String): List<ChatPoll> = readArray("polls.$chatId").mapObjects { pollOf(it) }
+
+    suspend fun refreshPolls(chatId: String): List<ChatPoll> {
+        val array = rpc("chat_polls", JSONObject().put("p_chat", chatId)).array() ?: JSONArray()
+        writeArray("polls.$chatId", array)
+        emit()
+        return array.mapObjects { pollOf(it) }
+    }
+
+    suspend fun createPoll(chatId: String, question: String, options: List<String>, multiple: Boolean) {
+        rpc(
+            "create_poll",
+            JSONObject()
+                .put("p_chat", chatId)
+                .put("p_question", question)
+                .put("p_options", JSONArray(options))
+                .put("p_multiple", multiple),
+        )
+        refreshPolls(chatId)
+    }
+
+    suspend fun vote(chatId: String, pollId: Long, choices: List<Int>) {
+        rpc("vote_poll", JSONObject().put("p_poll", pollId).put("p_choices", JSONArray(choices)))
+        refreshPolls(chatId)
+    }
+
+    suspend fun closePoll(chatId: String, pollId: Long, delete: Boolean) {
+        rpc("close_poll", JSONObject().put("p_poll", pollId).put("p_delete", delete))
+        refreshPolls(chatId)
+    }
+
+    fun cachedGroupTasks(): List<GroupTask> = readArray("tasks").mapObjects { taskOf(it) }
+
+    suspend fun refreshGroupTasks(): List<GroupTask> {
+        val array = rest("GET", "chat_tasks?select=id,chat_id,title,note,due_date,due_time,author&order=due_date.asc.nullslast,id.desc&limit=200").array() ?: JSONArray()
+        writeArray("tasks", array)
+        emit()
+        return array.mapObjects { taskOf(it) }
+    }
+
+    suspend fun addGroupTask(chatId: String, title: String, note: String, dueDate: String?, dueTime: String?) {
+        rpc(
+            "add_chat_task",
+            JSONObject()
+                .put("p_chat", chatId)
+                .put("p_title", title)
+                .put("p_note", note)
+                .put("p_due_date", dueDate ?: JSONObject.NULL)
+                .put("p_due_time", if (dueDate != null && dueTime != null) dueTime else JSONObject.NULL),
+        )
+        refreshGroupTasks()
+    }
+
+    suspend fun deleteGroupTask(taskId: Long) {
+        rpc("delete_chat_task", JSONObject().put("p_task", taskId))
+        refreshGroupTasks()
+    }
+
+    private fun roleOf(value: String) = when (value) {
+        "owner" -> "owner"
+        "helper" -> "helper"
+        else -> "member"
+    }
+
+    private fun JSONArray?.ints(): List<Int> = this?.let { a -> (0 until a.length()).map { a.optInt(it) } } ?: emptyList()
+
+    private fun pollOf(row: JSONObject): ChatPoll? {
+        if (!row.has("id")) return null
+        val options = row.optJSONArray("options")
+        return ChatPoll(
+            id = row.optLong("id"),
+            question = row.optString("question"),
+            options = options?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
+            multiple = row.optBoolean("multiple"),
+            closed = row.optBoolean("closed"),
+            author = row.optString("author"),
+            counts = row.optJSONArray("counts").ints(),
+            mine = row.optJSONArray("mine").ints(),
+            voters = row.optInt("voters"),
+        )
+    }
+
+    private fun taskOf(row: JSONObject): GroupTask? {
+        if (!row.has("id")) return null
+        return GroupTask(
+            id = row.optLong("id"),
+            chatId = row.optString("chat_id"),
+            title = row.optString("title"),
+            note = row.optString("note"),
+            dueDate = row.stringOrNull("due_date"),
+            dueTime = row.stringOrNull("due_time"),
+            author = row.optString("author"),
+        )
+    }
+
     suspend fun lookupUser(query: String): Pair<String, String> {
         val root = Account.api("GET", "/api/users/lookup?q=${java.net.URLEncoder.encode(query.trim(), "UTF-8")}")
         return root.optString("id") to root.optString("name")
@@ -328,7 +469,7 @@ object ChatStore {
             title = row.optString("title"),
             groupId = row.stringOrNull("group_id"),
             inviteCode = row.stringOrNull("invite_code"),
-            role = if (row.optString("role") == "owner") "owner" else "member",
+            role = roleOf(row.optString("role")),
             accepted = row.optBoolean("accepted", true),
             peerName = row.stringOrNull("peer_name"),
             lastId = if (row.isNull("last_id")) null else row.optLong("last_id"),
@@ -336,6 +477,8 @@ object ChatStore {
             lastAuthor = row.stringOrNull("last_author"),
             lastAt = row.stringOrNull("last_at"),
             unread = row.optInt("unread"),
+            pinnedBody = row.stringOrNull("pinned_body"),
+            pinnedAuthor = row.stringOrNull("pinned_author"),
         )
     }
 
@@ -353,6 +496,8 @@ object ChatStore {
         .put("last_author", chat.lastAuthor ?: JSONObject.NULL)
         .put("last_at", chat.lastAt ?: JSONObject.NULL)
         .put("unread", chat.unread)
+        .put("pinned_body", chat.pinnedBody ?: JSONObject.NULL)
+        .put("pinned_author", chat.pinnedAuthor ?: JSONObject.NULL)
 
     private fun messageOf(row: JSONObject, status: String): ChatMessage? {
         val chatId = row.optString("chat_id")

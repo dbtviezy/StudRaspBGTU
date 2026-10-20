@@ -127,6 +127,7 @@ object ScheduleRepository {
 }
 
 class Prefs(context: Context) {
+    private val app = context.applicationContext
     private val sp = context.getSharedPreferences("bgtu", Context.MODE_PRIVATE)
 
     fun groupId(): String? = sp.getString(KEY_GROUP, null)
@@ -141,10 +142,45 @@ class Prefs(context: Context) {
         sp.edit().putString(KEY_NAME, value.trim()).apply()
     }
 
-    fun darkTheme(): Boolean = sp.getBoolean(KEY_DARK, false)
+    /** The theme in effect: the system one when "follow system" is on, otherwise the saved choice. */
+    fun darkTheme(): Boolean = if (followSystemTheme()) systemDark() else sp.getBoolean(KEY_DARK, false)
 
     fun setDarkTheme(value: Boolean) {
         sp.edit().putBoolean(KEY_DARK, value).apply()
+    }
+
+    fun systemDark(): Boolean =
+        (app.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+    fun followSystemTheme(): Boolean = sp.getBoolean(KEY_THEME_SYSTEM, false)
+
+    fun setFollowSystemTheme(value: Boolean) {
+        sp.edit().putBoolean(KEY_THEME_SYSTEM, value).apply()
+    }
+
+    fun hideProfanity(): Boolean = sp.getBoolean(KEY_PROFANITY, false)
+
+    fun setHideProfanity(value: Boolean) {
+        sp.edit().putBoolean(KEY_PROFANITY, value).apply()
+    }
+
+    fun chatNotify(): Boolean = sp.getBoolean(KEY_CHAT_NOTIFY, false)
+
+    fun setChatNotify(value: Boolean) {
+        sp.edit().putBoolean(KEY_CHAT_NOTIFY, value).apply()
+    }
+
+    fun ongoingLesson(): Boolean = sp.getBoolean(KEY_ONGOING, false)
+
+    fun setOngoingLesson(value: Boolean) {
+        sp.edit().putBoolean(KEY_ONGOING, value).apply()
+    }
+
+    fun seenVersion(): String? = sp.getString(KEY_SEEN_VERSION, null)
+
+    fun setSeenVersion(value: String) {
+        sp.edit().putString(KEY_SEEN_VERSION, value).apply()
     }
 
     fun clearProfile() {
@@ -152,7 +188,7 @@ class Prefs(context: Context) {
     }
 
     fun wipeUserData() {
-        val keep = setOf(KEY_DARK, KEY_LANG, KEY_ONBOARDED)
+        val keep = setOf(KEY_DARK, KEY_LANG, KEY_ONBOARDED, KEY_THEME_SYSTEM, KEY_SEEN_VERSION)
         val edit = sp.edit()
         sp.all.keys.filterNot { it in keep }.forEach { edit.remove(it) }
         edit.apply()
@@ -237,6 +273,11 @@ class Prefs(context: Context) {
         private const val KEY_LANG = "lang"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_FRIEND = "friend"
+        private const val KEY_THEME_SYSTEM = "theme_system"
+        private const val KEY_PROFANITY = "hide_profanity"
+        private const val KEY_CHAT_NOTIFY = "chat_notify"
+        private const val KEY_ONGOING = "ongoing_lesson"
+        private const val KEY_SEEN_VERSION = "seen_version"
 
         private fun noteKey(date: String, lessonKey: String) = "note|$date|$lessonKey"
     }

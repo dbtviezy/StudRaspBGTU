@@ -32,7 +32,7 @@ export const viewport: Viewport = {
 };
 
 // Applies the saved theme before first paint so dark mode does not flash.
-const themeScript = `try{var d=localStorage.getItem("studrasp.dark")==="true";document.documentElement.dataset.theme=d?"dark":"light";var l=JSON.parse(localStorage.getItem("studrasp.lang")||"null");if(l)document.documentElement.lang=l}catch(e){}`;
+const themeScript = `try{var d=localStorage.getItem("studrasp.systemTheme")==="true"?matchMedia("(prefers-color-scheme: dark)").matches:localStorage.getItem("studrasp.dark")==="true";document.documentElement.dataset.theme=d?"dark":"light";var l=JSON.parse(localStorage.getItem("studrasp.lang")||"null");if(l)document.documentElement.lang=l}catch(e){}`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

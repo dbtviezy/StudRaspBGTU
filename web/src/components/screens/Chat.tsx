@@ -10,12 +10,14 @@ import {
   createGroupChat,
   deleteOwnMessage,
   discardMessage,
+  isStaff,
   joinChat,
   leaveChat,
   lookupUser,
   markRead,
   MAX_MESSAGE,
   type Message,
+  pinMessage,
   refreshChats,
   refreshMessages,
   regenerateInvite,
@@ -29,9 +31,11 @@ import {
   useOnline,
 } from "@/lib/chat";
 import type { Copy } from "@/lib/i18n";
+import { maskIf } from "@/lib/profanity";
 import { useShell } from "../context";
 import { Icon } from "../Icons";
 import { SignInSheet } from "../overlays/Account";
+import { GroupTasksSheet, MembersSheet, PinnedBar, PollsSheet } from "../overlays/ChatTools";
 import ReportDialog from "../overlays/Report";
 import { Alert, Centered, Chip, Dialog, useLongPress } from "../ui";
 
@@ -167,14 +171,14 @@ function InviteDialog({ chat, onClose }: { chat: ChatInfo; onClose: () => void }
 }
 
 function MessageBubble({ message, mine, showAuthor, onMenu }: { message: Message; mine: boolean; showAuthor: boolean; onMenu: () => void }) {
-  const { s } = useShell();
+  const { s, data } = useShell();
   const press = useLongPress(onMenu, () => message.status !== "sent" && onMenu());
   const meta = message.status === "pending" ? s.pendingMessage : message.status === "failed" ? s.failedMessage : timeOf(message.createdAt);
   return (
     <div className={`bubble-row${mine ? " mine" : ""}`}>
       <div className={`bubble ${message.status}`} {...press}>
         {showAuthor && !mine && <div className="who">{message.author}</div>}
-        {message.body}
+        {mine ? message.body : maskIf(data.hideProfanity, message.body)}
         <div className="meta">
           {message.status === "pending" && <Icon name="schedule" size={11} />} {meta}
         </div>
@@ -193,12 +197,17 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
   const [reporting, setReporting] = useState<Message | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [invite, setInvite] = useState(false);
+  const [more, setMore] = useState(false);
+  const [sheet, setSheet] = useState<"members" | "polls" | "tasks" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const log = useRef<HTMLDivElement>(null);
   const live = cachedChats().find((c) => c.id === chat.id) ?? chat;
   const messages = cachedMessages(chat.id);
   const lastId = messages.reduce((max, m) => Math.max(max, m.id ?? 0), 0);
   const request = live.kind === "dm" && !live.accepted;
+  const staff = isStaff(live);
+  const group = live.kind === "group";
+  const pin = (id: number | null) => pinMessage(chat.id, id).catch((e) => toast(errorOf(s, e)));
 
   useEffect(() => {
     let alive = true;
@@ -239,16 +248,22 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
             <div className="semibold ellipsis">{chatTitle(s, live)}</div>
             <div className="muted xsmall ellipsis">{live.kind === "dm" ? s.directChat : `${s.groupChat}${live.groupId ? ` · ${live.groupId}` : ""}`}</div>
           </div>
-          {live.kind === "group" && live.inviteCode && (
-            <button className="icon-btn" aria-label={s.inviteCode} onClick={() => setInvite(true)}>
-              <Icon name="add" />
-            </button>
+          {group && (
+            <>
+              <button className="icon-btn" aria-label={s.polls} title={s.polls} onClick={() => setSheet("polls")}>
+                <Icon name="poll" />
+              </button>
+              <button className="icon-btn" aria-label={s.groupTasks} title={s.groupTasks} onClick={() => setSheet("tasks")}>
+                <Icon name="checklist" />
+              </button>
+            </>
           )}
-          <button className="icon-btn" aria-label={s.leaveChat} onClick={() => setLeaving(true)}>
-            <Icon name="logout" />
+          <button className="icon-btn" aria-label={s.moreActions} onClick={() => setMore(true)}>
+            <Icon name="moreVert" />
           </button>
         </div>
       </div>
+      {group && <PinnedBar chat={live} onUnpin={staff ? () => pin(null) : null} />}
       {!online && <div className="offline-bar">{s.offlineBanner}</div>}
       <div className="chat-log" ref={log}>
         <div className="inner">
@@ -321,6 +336,17 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
                 {s.copyText}
               </button>
             )}
+            {menu.status === "sent" && staff && menu.id != null && (
+              <button
+                className="tbtn"
+                onClick={() => {
+                  pin(menu.id);
+                  setMenu(null);
+                }}
+              >
+                {s.pin}
+              </button>
+            )}
             {menu.status === "sent" && menu.userId === user?.id && menu.id != null && (
               <button
                 className="tbtn danger"
@@ -353,6 +379,22 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
       {reporting && reporting.id != null && (
         <ReportDialog onSend={(reason) => reportMessage(reporting.id!, reason)} onClose={() => setReporting(null)} />
       )}
+      {more && (
+        <Centered onClose={() => setMore(false)}>
+          <div className="stack tight" style={{ minWidth: 240 }}>
+            {group && (
+              <button className="tbtn" onClick={() => { setSheet("members"); setMore(false); }}>{s.members}</button>
+            )}
+            {group && live.inviteCode && (
+              <button className="tbtn" onClick={() => { setInvite(true); setMore(false); }}>{s.inviteCode}</button>
+            )}
+            <button className="tbtn danger" onClick={() => { setLeaving(true); setMore(false); }}>{s.leaveChat}</button>
+          </div>
+        </Centered>
+      )}
+      {sheet === "members" && <MembersSheet chat={live} onClose={() => setSheet(null)} />}
+      {sheet === "polls" && <PollsSheet chat={live} onClose={() => setSheet(null)} />}
+      {sheet === "tasks" && <GroupTasksSheet chat={live} onClose={() => setSheet(null)} />}
       {invite && <InviteDialog chat={live} onClose={() => setInvite(false)} />}
       {leaving && (
         <Alert title={s.leaveChat} text={s.leaveChatText} onClose={() => setLeaving(false)}>
@@ -373,12 +415,12 @@ function ChatView({ chat, onClose, onOpenChat }: { chat: ChatInfo; onClose: () =
 }
 
 function ChatRow({ chat, onOpen }: { chat: ChatInfo; onOpen: () => void }) {
-  const { s } = useShell();
+  const { s, data } = useShell();
   const title = chatTitle(s, chat);
   const preview = !chat.accepted
     ? `${chat.peerName ?? ""} ${s.chatRequest}`
     : chat.lastBody
-      ? `${chat.kind === "group" && chat.lastAuthor ? `${chat.lastAuthor}: ` : ""}${chat.lastBody}`
+      ? `${chat.kind === "group" && chat.lastAuthor ? `${chat.lastAuthor}: ` : ""}${maskIf(data.hideProfanity, chat.lastBody)}`
       : s.noMessages;
   return (
     <button className="card row" style={{ gap: 12 }} onClick={onOpen}>
@@ -407,7 +449,13 @@ export default function ChatScreen() {
   const [opened, setOpened] = useState<ChatInfo | null>(null);
   const [dialog, setDialog] = useState<"create" | "join" | "direct" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wanted, setWanted] = useState(() => new URLSearchParams(window.location.search).get("chat"));
   const chats = useMemo(() => (version >= 0 ? cachedChats() : []), [version]);
+  const shown = opened ?? (wanted ? chats.find((c) => c.id === wanted) ?? null : null);
+
+  useEffect(() => {
+    if (wanted) window.history.replaceState(null, "", window.location.pathname);
+  }, [wanted]);
 
   useEffect(() => {
     authConfig()
@@ -463,7 +511,17 @@ export default function ChatScreen() {
       <div className="muted xsmall" style={{ padding: "0 8px" }}>{s.nearbyAndroidOnly}</div>
 
       {signing && <SignInSheet onClose={() => setSigning(false)} />}
-      {opened && <ChatView key={opened.id} chat={opened} onClose={() => setOpened(null)} onOpenChat={setOpened} />}
+      {shown && (
+        <ChatView
+          key={shown.id}
+          chat={shown}
+          onClose={() => {
+            setOpened(null);
+            setWanted(null);
+          }}
+          onOpenChat={setOpened}
+        />
+      )}
       {dialog === "create" && (
         <FormDialog
           title={s.createGroupChat}

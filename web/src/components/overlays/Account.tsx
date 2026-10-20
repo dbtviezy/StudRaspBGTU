@@ -14,6 +14,7 @@ import {
   useAccount,
 } from "@/lib/account";
 import { clearChatCache } from "@/lib/chat";
+import { disablePush } from "@/lib/push";
 import { useShell } from "../context";
 import { GoogleLogin, TelegramLogin } from "../auth/Providers";
 import { Icon } from "../Icons";
@@ -227,6 +228,7 @@ export function AccountCard() {
   const leave = (options?: { everywhere?: boolean; deleteAccount?: boolean }) =>
     run(async () => {
       await signOut(options);
+      await disablePush();
       clearChatCache();
     });
 

@@ -19,7 +19,7 @@ create table if not exists public.chat_members (
   chat_id   uuid not null references public.chats (id) on delete cascade,
   user_id   uuid not null,
   name      text not null,
-  role      text not null default 'member' check (role in ('owner', 'member')),
+  role      text not null default 'member' check (role in ('owner', 'helper', 'member')),
   accepted  boolean not null default true,
   last_read bigint not null default 0,
   joined_at timestamptz not null default now(),
@@ -192,10 +192,197 @@ language sql security definer set search_path = public as $$
   where chat_id = p_chat and user_id = auth.uid()
 $$;
 
+-- v1.2: the chat creator (role 'owner', shown as the class rep) can make members helpers.
+alter table public.chat_members drop constraint if exists chat_members_role_check;
+alter table public.chat_members add constraint chat_members_role_check check (role in ('owner', 'helper', 'member'));
+
+-- The pinned text is copied, so it stays after the message itself expires.
+alter table public.chats add column if not exists pinned_body text;
+alter table public.chats add column if not exists pinned_author text;
+alter table public.chats add column if not exists pinned_at timestamptz;
+
+create or replace function public.is_staff(c uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from chat_members m join chats ch on ch.id = m.chat_id
+    where m.chat_id = c and m.user_id = auth.uid() and m.accepted and m.role in ('owner', 'helper') and ch.kind = 'group'
+  )
+$$;
+
+create or replace function public.set_member_role(p_chat uuid, p_user uuid, p_role text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if p_role not in ('helper', 'member') then raise exception 'bad_request' using errcode = 'P0001'; end if;
+  if not exists (select 1 from chat_members where chat_id = p_chat and user_id = auth.uid() and role = 'owner') then
+    raise exception 'forbidden' using errcode = 'P0001';
+  end if;
+  update chat_members set role = p_role where chat_id = p_chat and user_id = p_user and role <> 'owner';
+end $$;
+
+-- p_message null unpins.
+create or replace function public.pin_message(p_chat uuid, p_message bigint) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  m messages;
+begin
+  if not public.is_staff(p_chat) then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if p_message is null then
+    update chats set pinned_body = null, pinned_author = null, pinned_at = null where id = p_chat;
+    return;
+  end if;
+  select * into m from messages where id = p_message and chat_id = p_chat;
+  if m.id is null then raise exception 'bad_request' using errcode = 'P0001'; end if;
+  update chats set pinned_body = m.body, pinned_author = m.author, pinned_at = now() where id = p_chat;
+end $$;
+
+create table if not exists public.polls (
+  id         bigserial primary key,
+  chat_id    uuid not null references public.chats (id) on delete cascade,
+  question   varchar(200) not null check (length(btrim(question)) > 0),
+  options    text[] not null check (array_length(options, 1) between 2 and 8),
+  multiple   boolean not null default false,
+  closed     boolean not null default false,
+  created_by uuid not null,
+  author     text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists polls_chat_idx on public.polls (chat_id, id);
+
+create table if not exists public.poll_votes (
+  poll_id bigint not null references public.polls (id) on delete cascade,
+  user_id uuid not null,
+  choice  smallint not null,
+  primary key (poll_id, user_id, choice)
+);
+
+-- Read and written only through the functions below.
+alter table public.polls enable row level security;
+alter table public.poll_votes enable row level security;
+
+create or replace function public.create_poll(p_chat uuid, p_question text, p_options text[], p_multiple boolean) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare
+  opts text[];
+  new_id bigint;
+begin
+  if not public.is_staff(p_chat) or public.is_banned() then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  select array_agg(left(btrim(o), 100) order by n) into opts
+    from unnest(p_options) with ordinality as t(o, n) where btrim(coalesce(o, '')) <> '';
+  if btrim(coalesce(p_question, '')) = '' or coalesce(array_length(opts, 1), 0) not between 2 and 8 then
+    raise exception 'bad_request' using errcode = 'P0001';
+  end if;
+  if (select count(*) from polls where created_by = auth.uid() and created_at > now() - interval '1 day') >= 20 then
+    raise exception 'rate_limited' using errcode = 'P0001';
+  end if;
+  insert into polls (chat_id, question, options, multiple, created_by, author)
+    values (p_chat, left(btrim(p_question), 200), opts, coalesce(p_multiple, false), auth.uid(), public.my_name())
+    returning id into new_id;
+  return new_id;
+end $$;
+
+-- An empty array takes the vote back.
+create or replace function public.vote_poll(p_poll bigint, p_choices int[]) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  p polls;
+  picked int[] := coalesce(p_choices, '{}');
+begin
+  select * into p from polls where id = p_poll;
+  if p.id is null or not public.is_member(p.chat_id) or public.is_banned() or p.closed then
+    raise exception 'forbidden' using errcode = 'P0001';
+  end if;
+  if (not p.multiple and coalesce(array_length(picked, 1), 0) > 1)
+    or exists (select 1 from unnest(picked) c where c < 0 or c >= array_length(p.options, 1)) then
+    raise exception 'bad_request' using errcode = 'P0001';
+  end if;
+  delete from poll_votes where poll_id = p_poll and user_id = auth.uid();
+  insert into poll_votes (poll_id, user_id, choice) select distinct p_poll, auth.uid(), c::smallint from unnest(picked) c;
+end $$;
+
+create or replace function public.close_poll(p_poll bigint, p_delete boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  c uuid;
+begin
+  select chat_id into c from polls where id = p_poll;
+  if c is null or not public.is_staff(c) then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if p_delete then delete from polls where id = p_poll; else update polls set closed = true where id = p_poll; end if;
+end $$;
+
+create or replace function public.chat_polls(p_chat uuid)
+returns table (
+  id bigint, question text, options text[], multiple boolean, closed boolean, author text,
+  created_at timestamptz, counts int[], mine int[], voters int
+)
+language sql stable security definer set search_path = public as $$
+  select p.id, p.question::text, p.options, p.multiple, p.closed, p.author, p.created_at,
+    array(
+      select count(v.user_id)::int from generate_series(0, array_length(p.options, 1) - 1) i
+      left join poll_votes v on v.poll_id = p.id and v.choice = i
+      group by i order by i
+    ),
+    array(select v.choice::int from poll_votes v where v.poll_id = p.id and v.user_id = auth.uid() order by v.choice),
+    (select count(distinct v.user_id)::int from poll_votes v where v.poll_id = p.id)
+  from polls p
+  where p.chat_id = p_chat and public.is_member(p_chat)
+  order by p.id desc
+  limit 20
+$$;
+
+-- Deadlines the class rep posts for the whole group chat.
+create table if not exists public.chat_tasks (
+  id         bigserial primary key,
+  chat_id    uuid not null references public.chats (id) on delete cascade,
+  title      varchar(200) not null check (length(btrim(title)) > 0),
+  note       varchar(500) not null default '',
+  due_date   date,
+  due_time   text check (due_time is null or due_time ~ '^\d{2}:\d{2}$'),
+  created_by uuid not null,
+  author     text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists chat_tasks_chat_idx on public.chat_tasks (chat_id);
+alter table public.chat_tasks enable row level security;
+
+drop policy if exists chat_tasks_read on public.chat_tasks;
+create policy chat_tasks_read on public.chat_tasks for select to authenticated
+  using (public.is_member(chat_id));
+
+create or replace function public.add_chat_task(p_chat uuid, p_title text, p_note text, p_due_date date, p_due_time text) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare
+  new_id bigint;
+begin
+  if not public.is_staff(p_chat) or public.is_banned() then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  if btrim(coalesce(p_title, '')) = '' or (p_due_time is not null and p_due_time !~ '^\d{2}:\d{2}$') then
+    raise exception 'bad_request' using errcode = 'P0001';
+  end if;
+  if (select count(*) from chat_tasks where created_by = auth.uid() and created_at > now() - interval '1 day') >= 30 then
+    raise exception 'rate_limited' using errcode = 'P0001';
+  end if;
+  insert into chat_tasks (chat_id, title, note, due_date, due_time, created_by, author)
+    values (p_chat, left(btrim(p_title), 200), left(btrim(coalesce(p_note, '')), 500), p_due_date,
+      case when p_due_date is null then null else p_due_time end, auth.uid(), public.my_name())
+    returning id into new_id;
+  return new_id;
+end $$;
+
+create or replace function public.delete_chat_task(p_task bigint) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  c uuid;
+begin
+  select chat_id into c from chat_tasks where id = p_task;
+  if c is null or not public.is_staff(c) then raise exception 'forbidden' using errcode = 'P0001'; end if;
+  delete from chat_tasks where id = p_task;
+end $$;
+
+drop function if exists public.my_chats();
 create or replace function public.my_chats()
 returns table (
   id uuid, kind text, title text, group_id text, invite_code text, role text, accepted boolean,
-  peer_name text, last_id bigint, last_body text, last_author text, last_at timestamptz, unread int
+  peer_name text, last_id bigint, last_body text, last_author text, last_at timestamptz, unread int,
+  pinned_body text, pinned_author text, pinned_at timestamptz
 )
 language sql stable security definer set search_path = public as $$
   select c.id, c.kind, c.title, c.group_id,
@@ -203,7 +390,8 @@ language sql stable security definer set search_path = public as $$
     me.role, me.accepted,
     (select p.name from chat_members p where p.chat_id = c.id and p.user_id <> auth.uid() limit 1),
     l.id, l.body, l.author, l.created_at,
-    (select count(*)::int from messages u where u.chat_id = c.id and u.id > me.last_read and u.user_id <> auth.uid())
+    (select count(*)::int from messages u where u.chat_id = c.id and u.id > me.last_read and u.user_id <> auth.uid()),
+    c.pinned_body, c.pinned_author, c.pinned_at
   from chat_members me
   join chats c on c.id = me.chat_id
   left join lateral (select * from messages m where m.chat_id = c.id order by m.id desc limit 1) l on true
@@ -219,6 +407,22 @@ revoke all on function public.accept_chat(uuid) from public, anon;
 revoke all on function public.leave_chat(uuid) from public, anon;
 revoke all on function public.mark_read(uuid, bigint) from public, anon;
 revoke all on function public.my_chats() from public, anon;
+revoke all on function public.set_member_role(uuid, uuid, text) from public, anon;
+revoke all on function public.pin_message(uuid, bigint) from public, anon;
+revoke all on function public.create_poll(uuid, text, text[], boolean) from public, anon;
+revoke all on function public.vote_poll(bigint, int[]) from public, anon;
+revoke all on function public.close_poll(bigint, boolean) from public, anon;
+revoke all on function public.chat_polls(uuid) from public, anon;
+revoke all on function public.add_chat_task(uuid, text, text, date, text) from public, anon;
+revoke all on function public.delete_chat_task(bigint) from public, anon;
+grant execute on function public.set_member_role(uuid, uuid, text) to authenticated;
+grant execute on function public.pin_message(uuid, bigint) to authenticated;
+grant execute on function public.create_poll(uuid, text, text[], boolean) to authenticated;
+grant execute on function public.vote_poll(bigint, int[]) to authenticated;
+grant execute on function public.close_poll(bigint, boolean) to authenticated;
+grant execute on function public.chat_polls(uuid) to authenticated;
+grant execute on function public.add_chat_task(uuid, text, text, date, text) to authenticated;
+grant execute on function public.delete_chat_task(bigint) to authenticated;
 grant execute on function public.create_group_chat(text, text) to authenticated;
 grant execute on function public.join_chat(text) to authenticated;
 grant execute on function public.regenerate_invite(uuid) to authenticated;
@@ -242,3 +446,45 @@ select cron.schedule('chat-retention', '15 * * * *', $$
     and ((c.kind = 'group' and m.created_at < now() - interval '7 days')
       or (c.kind = 'dm' and m.created_at < now() - interval '72 hours'))
 $$);
+
+-- Polls live 30 days; group tasks two weeks after their due date (60 days without one).
+select cron.schedule('chat-extras-retention', '30 3 * * *', $$
+  delete from public.polls where created_at < now() - interval '30 days';
+  delete from public.chat_tasks
+  where (due_date is not null and due_date < current_date - 14)
+     or (due_date is null and created_at < now() - interval '60 days');
+$$);
+
+-- Web push: after every new message Supabase calls our server, which sends the notifications.
+-- Needs the pg_net extension (Database → Extensions → pg_net) and one row with the server address and
+-- the same secret as PUSH_WEBHOOK_SECRET on Vercel:
+--   insert into public.push_config (url, secret)
+--   values ('https://studraspbgtu-web.vercel.app/api/push/chat', '<PUSH_WEBHOOK_SECRET>');
+create extension if not exists pg_net;
+
+create table if not exists public.push_config (
+  id     int primary key default 1 check (id = 1),
+  url    text not null,
+  secret text not null
+);
+alter table public.push_config enable row level security;
+
+create or replace function public.messages_after_insert() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  cfg push_config;
+begin
+  select * into cfg from push_config where id = 1;
+  if cfg.url is not null then
+    perform net.http_post(
+      url := cfg.url,
+      body := jsonb_build_object('chat_id', new.chat_id, 'user_id', new.user_id, 'author', new.author, 'body', left(new.body, 300)),
+      headers := jsonb_build_object('Content-Type', 'application/json', 'X-Push-Secret', cfg.secret)
+    );
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists messages_after_insert on public.messages;
+create trigger messages_after_insert after insert on public.messages
+  for each row execute function public.messages_after_insert();

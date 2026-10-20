@@ -100,6 +100,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import ru.bgtu.schedule.R
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1268,10 +1269,30 @@ fun ProfileScreen(
     onRestored: (String, String) -> Unit = { _, _ -> },
     onOpenChats: () -> Unit = {},
     onOpenAdmin: () -> Unit = {},
+    followSystem: Boolean = false,
+    onFollowSystem: (Boolean) -> Unit = {},
+    onWhatsNew: () -> Unit = {},
 ) {
     val s = S
     val context = LocalContext.current
     val prefs = remember { ru.bgtu.schedule.data.Prefs(context.applicationContext) }
+    var chatNotifyOn by remember { mutableStateOf(prefs.chatNotify()) }
+    var ongoingOn by remember { mutableStateOf(prefs.ongoingLesson()) }
+    var afterPermission by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val extraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) afterPermission?.invoke()
+        afterPermission = null
+    }
+    fun withNotifications(action: () -> Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            afterPermission = action
+            extraPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            action()
+        }
+    }
     var name by remember(studentName) { mutableStateOf(studentName) }
     var confirmReset by remember { mutableStateOf(false) }
     var themeCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -1498,6 +1519,70 @@ fun ProfileScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
+        SoftCard {
+            Text(s.more.settingsTitle, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+            SettingSwitch(s.more.themeSystem, s.more.themeSystemHint, followSystem) { onFollowSystem(it) }
+            SettingSwitch(s.more.hideProfanity, s.more.hideProfanityHint, AppSignals.hideProfanity) { on ->
+                AppSignals.hideProfanity = on
+                prefs.setHideProfanity(on)
+            }
+            val account by ru.bgtu.schedule.data.Account.state.collectAsState()
+            SettingSwitch(
+                s.more.chatNotify,
+                if (account.signedIn) s.more.chatNotifyHint else s.more.chatNotifySignIn,
+                chatNotifyOn,
+            ) { on ->
+                if (!on) {
+                    chatNotifyOn = false
+                    prefs.setChatNotify(false)
+                    ru.bgtu.schedule.notify.ChatNotify.schedule(context)
+                } else if (!account.signedIn) {
+                    Toasts.show(s.more.chatNotifySignIn)
+                } else {
+                    withNotifications {
+                        chatNotifyOn = true
+                        prefs.setChatNotify(true)
+                        ru.bgtu.schedule.notify.ChatNotify.markSeen(context)
+                        ru.bgtu.schedule.notify.ChatNotify.schedule(context)
+                    }
+                }
+            }
+            SettingSwitch(s.more.ongoingLesson, s.more.ongoingLessonHint, ongoingOn) { on ->
+                val apply = {
+                    ongoingOn = on
+                    prefs.setOngoingLesson(on)
+                    Thread { ru.bgtu.schedule.notify.OngoingLesson.reschedule(context) }.start()
+                }
+                if (on) withNotifications(apply) else apply()
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        SoftCard {
+            val feed = remember(group.id) {
+                "${ru.bgtu.schedule.data.Http.BASE_URL}/api/ics/" +
+                    java.net.URLEncoder.encode(group.id, "UTF-8").replace("+", "%20") + ".ics"
+            }
+            val webcal = feed.replaceFirst("https://", "webcal://")
+            ProfileCardTitle(s.more.calendarSubTitle, s.more.calendarSubHint)
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                TextButton(onClick = {
+                    val url = "https://calendar.google.com/calendar/render?cid=" + java.net.URLEncoder.encode(webcal, "UTF-8")
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                }) { Text(s.more.calendarGoogle, color = Blue) }
+                TextButton(onClick = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webcal))) }
+                        .onFailure {
+                            copyToClipboard(context, feed)
+                            Toasts.show(s.more.linkCopied)
+                        }
+                }) { Text(s.more.calendarOther, color = Blue) }
+                TextButton(onClick = {
+                    copyToClipboard(context, feed)
+                    Toasts.show(s.more.linkCopied)
+                }) { Text(s.more.copyLink, color = Blue) }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         val openTodos = remember(profileTick) {
             ru.bgtu.schedule.data.TodoStore(context).all().count { !it.done }
         }
@@ -1680,7 +1765,10 @@ fun ProfileScreen(
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(32.dp))
+        TextButton(onClick = onWhatsNew, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            Text(s.more.whatsNewLink, color = Blue, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(24.dp))
         pendingCrop?.let { source ->
             CropPhotoDialog(
                 source = source,
@@ -1830,6 +1918,27 @@ private fun ProfileAvatar(stamp: Int, name: String, onPick: () -> Unit) {
 private fun ProfileCardTitle(title: String, hint: String? = null) {
     Text(title, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
     if (hint != null) Text(hint, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+}
+
+@Composable
+private fun SettingSwitch(title: String, hint: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, color = Ink, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            Text(hint, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = Blue,
+                checkedThumbColor = Color.White,
+                uncheckedTrackColor = Line,
+                uncheckedThumbColor = Color.White,
+                uncheckedBorderColor = Line,
+            ),
+        )
+    }
 }
 
 @Composable

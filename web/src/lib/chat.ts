@@ -11,7 +11,7 @@ export interface ChatInfo {
   title: string;
   groupId: string | null;
   inviteCode: string | null;
-  role: "owner" | "member";
+  role: Role;
   accepted: boolean;
   peerName: string | null;
   lastId: number | null;
@@ -19,6 +19,42 @@ export interface ChatInfo {
   lastAuthor: string | null;
   lastAt: string | null;
   unread: number;
+  pinnedBody: string | null;
+  pinnedAuthor: string | null;
+}
+
+export type Role = "owner" | "helper" | "member";
+
+/** The class rep (chat creator) and their helpers can pin, run polls and post group tasks. */
+export const isStaff = (chat: ChatInfo) => chat.kind === "group" && chat.accepted && (chat.role === "owner" || chat.role === "helper");
+
+export interface Member {
+  userId: string;
+  name: string;
+  role: Role;
+}
+
+export interface Poll {
+  id: number;
+  question: string;
+  options: string[];
+  multiple: boolean;
+  closed: boolean;
+  author: string;
+  createdAt: string;
+  counts: number[];
+  mine: number[];
+  voters: number;
+}
+
+export interface GroupTask {
+  id: number;
+  chatId: string;
+  title: string;
+  note: string;
+  dueDate: string | null;
+  dueTime: string | null;
+  author: string;
 }
 
 export interface Message {
@@ -44,6 +80,8 @@ export const MAX_MESSAGE = 1000;
 const CHATS_KEY = `${PREFIX}chats`;
 const OUTBOX_KEY = `${PREFIX}outbox`;
 const chatKey = (id: string) => `${PREFIX}chat.${id}`;
+const pollsKey = (id: string) => `${PREFIX}chat.polls.${id}`;
+const TASKS_KEY = `${PREFIX}chat.tasks`;
 const KEEP = 300;
 
 let ticket: Ticket | null = null;
@@ -159,7 +197,7 @@ function toChat(row: Record<string, unknown>): ChatInfo {
     title: String(row.title ?? ""),
     groupId: row.group_id ? String(row.group_id) : null,
     inviteCode: row.invite_code ? String(row.invite_code) : null,
-    role: row.role === "owner" ? "owner" : "member",
+    role: roleOf(row.role),
     accepted: row.accepted !== false,
     peerName: row.peer_name ? String(row.peer_name) : null,
     lastId: row.last_id == null ? null : Number(row.last_id),
@@ -167,8 +205,12 @@ function toChat(row: Record<string, unknown>): ChatInfo {
     lastAuthor: row.last_author ? String(row.last_author) : null,
     lastAt: row.last_at ? String(row.last_at) : null,
     unread: Number(row.unread ?? 0),
+    pinnedBody: row.pinned_body ? String(row.pinned_body) : null,
+    pinnedAuthor: row.pinned_author ? String(row.pinned_author) : null,
   };
 }
+
+const roleOf = (value: unknown): Role => (value === "owner" || value === "helper" ? value : "member");
 
 function toMessage(row: Record<string, unknown>): Message {
   return {
@@ -315,6 +357,90 @@ export async function markRead(chatId: string, id: number) {
   await rpc("mark_read", { p_chat: chatId, p_id: id }).catch(() => undefined);
   write(CHATS_KEY, cachedChats().map((c) => (c.id === chatId ? { ...c, unread: 0 } : c)));
   emit();
+}
+
+export async function pinMessage(chatId: string, messageId: number | null) {
+  await rpc("pin_message", { p_chat: chatId, p_message: messageId });
+  await refreshChats();
+}
+
+export async function fetchMembers(chatId: string): Promise<Member[]> {
+  const rows = await rest<Record<string, unknown>[]>(`chat_members?chat_id=eq.${chatId}&accepted=eq.true&select=user_id,name,role&order=joined_at.asc`);
+  return (rows ?? []).map((row) => ({ userId: String(row.user_id), name: String(row.name), role: roleOf(row.role) }));
+}
+
+export async function setMemberRole(chatId: string, userId: string, role: "helper" | "member") {
+  await rpc("set_member_role", { p_chat: chatId, p_user: userId, p_role: role });
+}
+
+export function cachedPolls(chatId: string): Poll[] {
+  return read<Poll[]>(pollsKey(chatId), []);
+}
+
+export async function refreshPolls(chatId: string): Promise<Poll[]> {
+  const rows = await rpc<Record<string, unknown>[]>("chat_polls", { p_chat: chatId });
+  const polls = (rows ?? []).map((row) => ({
+    id: Number(row.id),
+    question: String(row.question),
+    options: ((row.options as string[] | null) ?? []).map(String),
+    multiple: row.multiple === true,
+    closed: row.closed === true,
+    author: String(row.author ?? ""),
+    createdAt: String(row.created_at),
+    counts: ((row.counts as number[] | null) ?? []).map(Number),
+    mine: ((row.mine as number[] | null) ?? []).map(Number),
+    voters: Number(row.voters ?? 0),
+  }));
+  write(pollsKey(chatId), polls);
+  emit();
+  return polls;
+}
+
+export async function createPoll(chatId: string, question: string, options: string[], multiple: boolean) {
+  await rpc("create_poll", { p_chat: chatId, p_question: question, p_options: options, p_multiple: multiple });
+  await refreshPolls(chatId);
+}
+
+export async function votePoll(chatId: string, pollId: number, choices: number[]) {
+  await rpc("vote_poll", { p_poll: pollId, p_choices: choices });
+  await refreshPolls(chatId);
+}
+
+export async function closePoll(chatId: string, pollId: number, remove: boolean) {
+  await rpc("close_poll", { p_poll: pollId, p_delete: remove });
+  await refreshPolls(chatId);
+}
+
+export function cachedGroupTasks(): GroupTask[] {
+  return read<GroupTask[]>(TASKS_KEY, []);
+}
+
+export async function refreshGroupTasks(): Promise<GroupTask[]> {
+  const rows = await rest<Record<string, unknown>[]>(
+    "chat_tasks?select=id,chat_id,title,note,due_date,due_time,author&order=due_date.asc.nullslast,id.desc&limit=200",
+  );
+  const tasks = (rows ?? []).map((row) => ({
+    id: Number(row.id),
+    chatId: String(row.chat_id),
+    title: String(row.title),
+    note: String(row.note ?? ""),
+    dueDate: row.due_date ? String(row.due_date) : null,
+    dueTime: row.due_time ? String(row.due_time) : null,
+    author: String(row.author ?? ""),
+  }));
+  write(TASKS_KEY, tasks);
+  emit();
+  return tasks;
+}
+
+export async function addGroupTask(chatId: string, title: string, note: string, dueDate: string | null, dueTime: string | null) {
+  await rpc("add_chat_task", { p_chat: chatId, p_title: title, p_note: note, p_due_date: dueDate, p_due_time: dueDate ? dueTime : null });
+  await refreshGroupTasks();
+}
+
+export async function deleteGroupTask(taskId: number) {
+  await rpc("delete_chat_task", { p_task: taskId });
+  await refreshGroupTasks();
 }
 
 export async function lookupUser(query: string): Promise<{ id: string; name: string }> {

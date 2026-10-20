@@ -32,8 +32,9 @@ function daysOf(value: unknown): number | null {
   return days;
 }
 
-async function log(action: string, target: unknown) {
-  await sql()`INSERT INTO admin_log (action, target) VALUES (${action}, ${String(target ?? "")})`;
+async function log(action: string, target: unknown, detail: unknown) {
+  const text = typeof detail === "string" ? detail.trim().slice(0, 300) : "";
+  await sql()`INSERT INTO admin_log (action, target, detail) VALUES (${action}, ${String(target ?? "")}, ${text})`;
 }
 
 async function stats() {
@@ -180,11 +181,25 @@ async function users(url: URL) {
   }));
 }
 
+async function moderationLog() {
+  const q = sql();
+  if (Math.random() < 0.05) await q`DELETE FROM admin_log WHERE created_at < now() - interval '180 days'`;
+  const rows = await q`SELECT id, action, target, detail, created_at FROM admin_log ORDER BY id DESC LIMIT 200`;
+  return rows.map((row) => ({
+    id: Number(row.id),
+    action: String(row.action),
+    target: String(row.target ?? ""),
+    detail: String(row.detail ?? ""),
+    createdAt: iso(row.created_at),
+  }));
+}
+
 export const GET = handle(async (request: Request) => {
   requireAdmin(request);
   await ensureSchema();
   const url = new URL(request.url);
   switch (url.searchParams.get("view")) {
+    case "log": return json({ items: await moderationLog() });
     case "stats": return json(await stats());
     case "reports": return json({ items: await reports() });
     case "reviews": return json({ items: await reviews(url) });
@@ -305,6 +320,6 @@ export const POST = handle(async (request: Request) => {
     default:
       throw new ApiError(400, "bad_request");
   }
-  await log(action, body.id ?? body.target ?? body.userId);
+  await log(action, body.id ?? body.target ?? body.userId, body.reason ?? body.text);
   return json({ ok: true });
 });

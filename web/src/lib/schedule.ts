@@ -377,6 +377,29 @@ export function nextTeacherLessons(
   return result;
 }
 
+/** The teacher's current class, or the next one if they are free; `groups` lists every group sitting in it. */
+export interface TeacherWhere {
+  inClass: boolean;
+  day: ISODate;
+  lesson: Lesson;
+  groups: string[];
+  /** Minutes left in the class, or until it starts today; -1 for a later day. */
+  minutes: number;
+}
+
+export function teacherWhere(bundle: Bundle, teacher: string, today: ISODate, now: Date): TeacherWhere | null {
+  const items = nextTeacherLessons(bundle, teacher, today, now, 30);
+  const first = items[0];
+  if (!first) return null;
+  const groups = [...new Set(items.filter((i) => i.day === first.day && i.lesson.start === first.lesson.start).map((i) => i.groupId))];
+  const nowM = minutesOf(now);
+  const start = toMinutes(first.lesson.start);
+  const end = toMinutes(first.lesson.end);
+  const inClass = first.day === today && start != null && end != null && nowM >= start && nowM < end;
+  const minutes = inClass ? Math.max(1, Math.floor(end! - nowM)) : first.day === today && start != null ? Math.max(0, Math.floor(start - nowM)) : -1;
+  return { inClass, day: first.day, lesson: first.lesson, groups, minutes };
+}
+
 const PAIR_STARTS = ["08:00", "09:45", "11:30", "13:20", "15:05", "16:50", "18:35", "20:00"];
 
 export function sharedFree(

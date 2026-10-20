@@ -149,6 +149,7 @@ fun TeacherDialog(bundle: ScheduleBundle, name: String, onClose: () -> Unit, onF
                     }
                 }
             }
+            item(key = "where") { WhereCard(bundle, key) }
             items(people, key = { "rating|$it" }) { person ->
                 RatingCard(person, showName = people.size > 1)
             }
@@ -192,6 +193,45 @@ fun TeacherDialog(bundle: ScheduleBundle, name: String, onClose: () -> Unit, onF
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WhereCard(bundle: ScheduleBundle, teacher: String) {
+    val s = S
+    val now = rememberNow()
+    val where = remember(teacher, bundle, now.hour, now.minute) {
+        ru.bgtu.schedule.data.teacherWhere(bundle, teacher, now.toLocalDate(), now.toLocalTime(), bundle.semesterStart)
+    }
+    val today = now.toLocalDate()
+    SoftCard {
+        Text(s.more.whereTitle.uppercase(), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            when {
+                where == null -> s.more.whereNone
+                where.inClass -> s.more.whereInClass
+                else -> s.more.whereFree
+            },
+            color = if (where?.inClass == true) Blue else Ink,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        if (where != null) {
+            val whenText = when {
+                where.inClass -> "${s.more.untilTime(where.lesson.end)} · ${s.leftPhrase(where.minutes)}"
+                where.day == today -> "${s.more.whereNext}: ${where.lesson.start} · ${s.untilPhrase(where.minutes)}"
+                else -> "${s.more.whereNext}: ${s.formatLongDate(where.day)}, ${where.lesson.start}"
+            }
+            Text(whenText, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+            Text(
+                listOf(s.roomName(where.lesson.room), where.lesson.subject).filter { it.isNotBlank() }.joinToString(" · "),
+                color = Ink,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(s.more.groupsLine(where.groups), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
         }
     }
 }
@@ -361,7 +401,7 @@ private fun ReviewCard(review: TeacherReview, title: String? = null, own: Boolea
             modifier = Modifier.padding(top = 2.dp),
         )
         if (review.text.isNotBlank()) {
-            Text(review.text, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            Text(if (own) review.text else censor(review.text), color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
         if (review.id > 0) {
             Row(

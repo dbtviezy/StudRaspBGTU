@@ -1,9 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useAccount } from "@/lib/account";
 import { download, exportBackup, importBackup } from "@/lib/backup";
 import { APP_VERSION } from "@/lib/i18n";
+import { subscriptionUrl } from "@/lib/ics";
 import { clearFiles, setAvatar, useAvatar, useLibrary } from "@/lib/idb";
+import { disablePush, enablePush, syncPush } from "@/lib/push";
 import { weekInfo } from "@/lib/schedule";
 import { actions, setState, sortedTodos } from "@/lib/store";
 import { originOf, switchTheme } from "@/lib/theme";
@@ -11,7 +14,20 @@ import { useShell } from "../context";
 import { Icon, TelegramIcon } from "../Icons";
 import { AccountCard } from "../overlays/Account";
 import CropPhoto from "../overlays/CropPhoto";
+import WhatsNew from "../overlays/WhatsNew";
 import { Alert, Detail, LanguageMark, Switch } from "../ui";
+
+function SettingRow({ title, hint, on, onToggle }: { title: string; hint: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div className="row mt12" style={{ gap: 12 }}>
+      <div className="grow">
+        <div className="semibold small">{title}</div>
+        <div className="muted xsmall mt2">{hint}</div>
+      </div>
+      <Switch on={on} label={title} onToggle={onToggle} />
+    </div>
+  );
+}
 
 function Card({ title, hint, children }: { title: string; hint?: string; children?: React.ReactNode }) {
   return (
@@ -33,7 +49,27 @@ export default function ProfileScreen() {
   const [resetting, setResetting] = useState(false);
   const [withFiles, setWithFiles] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [whatsNew, setWhatsNew] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const { user } = useAccount();
   const info = weekInfo(today, bundle.semesterStart);
+  const feed = subscriptionUrl(window.location.origin, group.id);
+  const webcal = feed.replace(/^https?:/, "webcal:");
+
+  const togglePush = async () => {
+    if (pushBusy) return;
+    if (data.chatPush) return disablePush();
+    if (!user) return toast(s.chatNotifySignIn);
+    setPushBusy(true);
+    try {
+      await enablePush();
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "";
+      setMessage(code === "unsupported" ? s.pushUnsupported : code === "denied" ? s.pushDenied : s.errorText(code));
+    } finally {
+      setPushBusy(false);
+    }
+  };
   const friend = data.friend ? bundle.find(data.friend) : null;
   const openTodos = sortedTodos(data.todos).filter((t) => !t.done);
   const initial = (data.name.trim() || s.studentFallback)[0]?.toUpperCase() ?? "?";
@@ -177,6 +213,35 @@ export default function ProfileScreen() {
         </div>
       </button>
 
+      <Card title={s.settingsTitle}>
+        <SettingRow title={s.themeSystem} hint={s.themeSystemHint} on={data.systemTheme} onToggle={() => setState({ systemTheme: !data.systemTheme })} />
+        <SettingRow
+          title={s.hideProfanity}
+          hint={s.hideProfanityHint}
+          on={data.hideProfanity}
+          onToggle={() => {
+            setState({ hideProfanity: !data.hideProfanity });
+            syncPush();
+          }}
+        />
+        <SettingRow title={s.chatNotify} hint={user ? s.chatNotifyHint : s.chatNotifySignIn} on={data.chatPush} onToggle={togglePush} />
+      </Card>
+
+      <Card title={s.calendarSubTitle} hint={s.calendarSubHint}>
+        <div className="row mt4" style={{ marginLeft: -8, flexWrap: "wrap" }}>
+          <a className="tbtn" href={webcal}>{s.calendarSubscribe}</a>
+          <a className="tbtn" href={`https://calendar.google.com/calendar/render?cid=${encodeURIComponent(webcal)}`} target="_blank" rel="noreferrer">
+            {s.calendarGoogle}
+          </a>
+          <button
+            className="tbtn"
+            onClick={() => navigator.clipboard?.writeText(feed).then(() => toast(s.linkCopied)).catch(() => setMessage(s.copyFailed))}
+          >
+            {s.copyLink}
+          </button>
+        </div>
+      </Card>
+
       <Card title={s.absences} hint={subjects.length === 0 ? s.absencesEmpty : undefined}>
         {subjects.map((subject) => {
           const count = data.absences.filter((a) => a.subject === subject).length;
@@ -273,7 +338,12 @@ export default function ProfileScreen() {
         )}
       </Card>
 
-      <div className="muted xsmall" style={{ textAlign: "center" }}>{`${s.appName} ${APP_VERSION}`}</div>
+      <div className="muted xsmall" style={{ textAlign: "center" }}>
+        {`${s.appName} ${APP_VERSION} · `}
+        <button className="blue xsmall" onClick={() => setWhatsNew(true)}>{s.whatsNewLink}</button>
+      </div>
+
+      {whatsNew && <WhatsNew s={s} onClose={() => setWhatsNew(false)} />}
 
       {cropping && (
         <CropPhoto

@@ -37,6 +37,11 @@ export interface Data {
   favoriteTeachers: string[];
   todos: TodoItem[];
   fileTags: Record<string, string[]>;
+  systemTheme: boolean;
+  hideProfanity: boolean;
+  chatPush: boolean;
+  /** Last app version whose "What's new" screen was shown. */
+  seenVersion: string | null;
 }
 
 const DEFAULTS: Data = {
@@ -55,11 +60,15 @@ const DEFAULTS: Data = {
   favoriteTeachers: [],
   todos: [],
   fileTags: {},
+  systemTheme: false,
+  hideProfanity: false,
+  chatPush: false,
+  seenVersion: null,
 };
 
 export const PREFIX = "studrasp.";
 const KEYS = Object.keys(DEFAULTS) as (keyof Data)[];
-const KEPT_ON_RESET: (keyof Data)[] = ["lang", "dark", "onboarded"];
+const KEPT_ON_RESET: (keyof Data)[] = ["lang", "dark", "onboarded", "systemTheme", "seenVersion"];
 
 let state: Data = DEFAULTS;
 let loaded = false;

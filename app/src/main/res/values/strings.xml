@@ -2,4 +2,6 @@
     <string name="app_name">СтудРаспБГТУ</string>
     <string name="widget_name">Расписание</string>
     <string name="widget_description">Пары на выбранный день недели</string>
+    <string name="widget_week_name">Расписание на неделю</string>
+    <string name="widget_week_description">Все пары текущей недели</string>
 </resources>

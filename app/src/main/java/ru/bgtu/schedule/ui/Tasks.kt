@@ -32,6 +32,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +73,17 @@ fun TasksOverlay(group: Group, onClose: () -> Unit, onChanged: () -> Unit) {
     var creating by remember { mutableStateOf(false) }
     val open = items.filterNot { it.done }
     val done = items.filter { it.done }
+    val account by ru.bgtu.schedule.data.Account.state.collectAsState()
+    val chatVersion by ru.bgtu.schedule.data.ChatStore.version.collectAsState()
+    val today = LocalDate.now().toString()
+    val groupTasks = remember(chatVersion, account.signedIn) {
+        if (!account.signedIn) emptyList()
+        else ru.bgtu.schedule.data.ChatStore.cachedGroupTasks().filter { it.dueDate == null || it.dueDate >= today }
+    }
+    val chatTitles = remember(chatVersion) { ru.bgtu.schedule.data.ChatStore.cachedChats().associate { it.id to it.title } }
+    LaunchedEffect(account.signedIn) {
+        if (account.signedIn) runCatching { ru.bgtu.schedule.data.ChatStore.refreshGroupTasks() }
+    }
 
     Column(
         Modifier
@@ -123,6 +136,18 @@ fun TasksOverlay(group: Group, onClose: () -> Unit, onChanged: () -> Unit) {
                     }, onOpen = { editor = item })
                     Spacer(Modifier.height(8.dp))
                 }
+            }
+        }
+        if (groupTasks.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(s.more.groupTasks, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+            Spacer(Modifier.height(8.dp))
+            groupTasks.forEach { task ->
+                GroupTaskCard(task, chatTitle = chatTitles[task.chatId]?.ifBlank { null }) {
+                    tick++
+                    onChanged()
+                }
+                Spacer(Modifier.height(8.dp))
             }
         }
     }
@@ -440,7 +465,7 @@ internal fun deadlineText(copy: Copy, item: TodoItem): String {
     return if (item.deadlineTime.isNullOrBlank()) base else "$base · ${item.deadlineTime}"
 }
 
-private fun normalizeTime(raw: String): String? {
+internal fun normalizeTime(raw: String): String? {
     val text = raw.trim()
     if (text.isEmpty()) return null
     val parts = text.split(":")

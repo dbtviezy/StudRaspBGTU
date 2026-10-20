@@ -176,6 +176,8 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 LessonAlerts.reschedule(context)
                 DeadlineAlerts.reschedule(context)
+                OngoingLesson.reschedule(context)
+                ChatNotify.schedule(context)
             } finally {
                 pending.finish()
             }

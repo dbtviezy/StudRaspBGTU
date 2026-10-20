@@ -141,7 +141,7 @@ fun AnnouncementsBanner() {
     }
 }
 
-private enum class AdminTab { STATS, REPORTS, REVIEWS, MESSAGES, BANS, ANNOUNCEMENTS, USERS }
+private enum class AdminTab { STATS, REPORTS, REVIEWS, MESSAGES, BANS, ANNOUNCEMENTS, USERS, LOG }
 
 /** Runs a moderation call, shows "done" or the error, then reloads the list. */
 @Composable
@@ -223,6 +223,7 @@ fun AdminScreen(onClose: () -> Unit) {
                     AdminTab.BANS -> s.more.adminBans
                     AdminTab.ANNOUNCEMENTS -> s.more.adminAnnouncements
                     AdminTab.USERS -> s.more.adminUsers
+                    AdminTab.LOG -> s.more.adminLog
                 }
                 FilterChip(label, tab == item) { tab = item }
             }
@@ -237,6 +238,25 @@ fun AdminScreen(onClose: () -> Unit) {
                 AdminTab.BANS -> BansTab(reload, moderate)
                 AdminTab.ANNOUNCEMENTS -> AnnouncementsTab(reload, moderate)
                 AdminTab.USERS -> UsersTab(reload, moderate)
+                AdminTab.LOG -> LogTab(reload)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogTab(reload: Int) {
+    val s = S
+    Loaded(reload, { AdminApi.log() }) { items ->
+        AdminList {
+            if (items.isEmpty()) item { EmptyLine() }
+            items(items, key = { it.id }) { entry ->
+                SoftCard {
+                    Text(s.more.adminAction(entry.action), color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    if (entry.target.isNotBlank()) Text("#${entry.target}", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                    if (entry.detail.isNotBlank()) Text(entry.detail, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+                    Text(stamp(entry.createdAt), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                }
             }
         }
     }

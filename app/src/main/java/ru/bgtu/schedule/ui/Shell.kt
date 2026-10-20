@@ -15,6 +15,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -99,6 +100,8 @@ private class ShellUi {
     var tasks by mutableStateOf(false)
     var tasksVersion by mutableIntStateOf(0)
     var admin by mutableStateOf(false)
+    var followSystem by mutableStateOf(false)
+    var whatsNew by mutableStateOf(false)
 }
 
 private data class ThemeReveal(val toDark: Boolean, val origin: Offset)
@@ -142,8 +145,19 @@ fun BgtuApp() {
     var reveal by remember { mutableStateOf<ThemeReveal?>(null) }
     var rootInWindow by remember { mutableStateOf(Offset.Zero) }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
-    val shellUi = remember { ShellUi() }
+    val shellUi = remember {
+        AppSignals.hideProfanity = prefs.hideProfanity()
+        ShellUi().also { it.followSystem = prefs.followSystemTheme() }
+    }
     var attempt by remember { mutableIntStateOf(0) }
+    val systemDark = isSystemInDarkTheme()
+
+    LaunchedEffect(shellUi.followSystem, systemDark) {
+        if (shellUi.followSystem && reveal == null && dark != systemDark) {
+            dark = systemDark
+            ru.bgtu.schedule.widget.ScheduleWidget.refresh(context.applicationContext)
+        }
+    }
 
     LaunchedEffect(attempt) {
         val started = System.currentTimeMillis()
@@ -162,12 +176,18 @@ fun BgtuApp() {
             withContext(Dispatchers.IO) {
                 ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(context.applicationContext)
                 if (prefs.notifyEnabled()) LessonAlerts.reschedule(context.applicationContext)
+                ru.bgtu.schedule.notify.OngoingLesson.reschedule(context.applicationContext)
+                ru.bgtu.schedule.notify.ChatNotify.schedule(context.applicationContext)
             }
         }
     }
 
     fun beginTheme(toDark: Boolean, centerInWindow: Offset) {
         if (reveal != null || toDark == dark) return
+        if (shellUi.followSystem) {
+            shellUi.followSystem = false
+            prefs.setFollowSystemTheme(false)
+        }
         reveal = ThemeReveal(toDark, centerInWindow - rootInWindow)
     }
 
@@ -205,6 +225,7 @@ fun BgtuApp() {
             onFinishOnboarding = {
                 if (lang == null) applyLanguage("ru")
                 prefs.setOnboarded(true)
+                prefs.setSeenVersion(AppVersion.LABEL)
                 onboarded = true
             },
             onPickFriend = { id ->
@@ -225,6 +246,9 @@ fun BgtuApp() {
             onStartPick = { picking = true },
             onReset = {
                 LessonAlerts.cancelAll(context)
+                ru.bgtu.schedule.notify.OngoingLesson.reschedule(context)
+                ru.bgtu.schedule.notify.ChatNotify.schedule(context)
+                AppSignals.hideProfanity = false
                 ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(context)
                 ru.bgtu.schedule.widget.ScheduleWidget.refresh(context.applicationContext)
                 groupId = null
@@ -465,8 +489,19 @@ private fun MainShell(
     val unread = remember(chatVersion, account.signedIn) { if (account.signedIn) ChatStore.unreadTotal() else 0 }
     val copy = S
 
+    var updateTag by remember { mutableStateOf<String?>(null) }
     if (windows) {
         LaunchedEffect(Unit) { Account.refresh() }
+        LaunchedEffect(AppSignals.openChat) {
+            if (AppSignals.openChat != null) shellUi.tab = 4
+        }
+        LaunchedEffect(Unit) {
+            if (prefs.seenVersion() != AppVersion.LABEL) {
+                shellUi.whatsNew = true
+            } else if (!ru.bgtu.schedule.BuildConfig.ADMIN) {
+                updateTag = ru.bgtu.schedule.data.Updates.newerVersion(context, ru.bgtu.schedule.BuildConfig.VERSION_NAME)
+            }
+        }
         LaunchedEffect(Unit) {
             Account.pendingCode.collect { code ->
                 if (code == null) return@collect
@@ -580,6 +615,12 @@ private fun MainShell(
                         },
                         onOpenChats = { shellUi.tab = 4 },
                         onOpenAdmin = { shellUi.admin = true },
+                        followSystem = shellUi.followSystem,
+                        onFollowSystem = { on ->
+                            shellUi.followSystem = on
+                            prefs.setFollowSystemTheme(on)
+                        },
+                        onWhatsNew = { shellUi.whatsNew = true },
                     )
                 }
             }
@@ -636,6 +677,13 @@ private fun MainShell(
                     onClose = { shellUi.opened = null },
                 )
             }
+            if (shellUi.whatsNew) {
+                WhatsNewDialog(onClose = {
+                    shellUi.whatsNew = false
+                    prefs.setSeenVersion(AppVersion.LABEL)
+                })
+            }
+            updateTag?.let { tag -> UpdateDialog(tag) { updateTag = null } }
             ToastHost()
         }
     }

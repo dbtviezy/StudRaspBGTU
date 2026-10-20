@@ -9,6 +9,8 @@ import androidx.activity.enableEdgeToEdge
 import ru.bgtu.schedule.data.Account
 import ru.bgtu.schedule.data.AdminApi
 import ru.bgtu.schedule.data.ChatStore
+import ru.bgtu.schedule.notify.ChatNotify
+import ru.bgtu.schedule.ui.AppSignals
 import ru.bgtu.schedule.ui.BgtuApp
 
 class MainActivity : ComponentActivity() {
@@ -17,7 +19,10 @@ class MainActivity : ComponentActivity() {
         Account.init(this)
         ChatStore.init(this)
         AdminApi.init(this)
-        if (savedInstanceState == null) Account.acceptLink(intent?.data)
+        if (savedInstanceState == null) {
+            Account.acceptLink(intent?.data)
+            openChatFrom(intent)
+        }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(0xFF2A56F6.toInt()),
             navigationBarStyle = SystemBarStyle.dark(0xFF2A56F6.toInt()),
@@ -30,5 +35,21 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Account.acceptLink(intent.data)
+        openChatFrom(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        ChatNotify.foreground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        ChatNotify.foreground = false
+        ChatNotify.markSeen(this)
+    }
+
+    private fun openChatFrom(intent: Intent?) {
+        intent?.getStringExtra(ChatNotify.EXTRA_CHAT)?.let { AppSignals.openChat = it }
     }
 }
