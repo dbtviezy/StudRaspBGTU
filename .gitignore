@@ -8,6 +8,7 @@ captures/
 app/build/
 dist/
 .cursor/
+/AGENTS.md
 
 node_modules/
 .next/
