@@ -126,6 +126,7 @@ class AbsenceStore(context: Context) {
 
 private val TEACHER_NAME = Regex("""([А-ЯЁA-Z][а-яёa-z\-]+)((?:\s+[А-ЯЁA-Z]?\.){1,2})""")
 
+// Ratings are keyed by these names; keep identical to splitTeachers() in web/src/lib/schedule.ts.
 fun splitTeachers(raw: String): List<String> {
     val found = TEACHER_NAME.findAll(raw).map { match ->
         val initials = match.groupValues[2].split('.').map { it.trim() }.filter { it.isNotEmpty() }
