@@ -32,15 +32,17 @@ data class ChatInfo(
     val unread: Int,
     val pinnedBody: String? = null,
     val pinnedAuthor: String? = null,
+    /** I am the confirmed class rep of this chat's group. */
+    val rep: Boolean = false,
 ) {
     val isDirect: Boolean get() = kind == "dm"
     val isOwner: Boolean get() = role == "owner"
 
-    /** The creator and the helpers they appointed can pin messages, run polls and post group tasks. */
-    val isStaff: Boolean get() = !isDirect && accepted && (role == "owner" || role == "helper")
+    /** The creator, their helpers and the confirmed class rep can pin messages, run polls and post group tasks. */
+    val isStaff: Boolean get() = !isDirect && accepted && (role == "owner" || role == "helper" || rep)
 }
 
-data class ChatMember(val userId: String, val name: String, val role: String)
+data class ChatMember(val userId: String, val name: String, val role: String, val rep: Boolean = false)
 
 data class ChatPoll(
     val id: Long,
@@ -168,7 +170,7 @@ object ChatStore {
 
     private fun supabaseError(status: Int, body: String): String {
         val message = runCatching { JSONObject(body).optString("message") }.getOrNull().orEmpty()
-        listOf("rate_limited", "invalid_code", "forbidden", "bad_request").firstOrNull { message.contains(it) }?.let { return it }
+        listOf("rate_limited", "invalid_code", "muted", "no_create", "forbidden", "bad_request").firstOrNull { message.contains(it) }?.let { return it }
         if (status == 401 || status == 403) return "forbidden"
         return if (status >= 500) "server_error" else "bad_request"
     }
@@ -350,11 +352,25 @@ object ChatStore {
         refreshChats()
     }
 
-    suspend fun members(chatId: String): List<ChatMember> =
-        rest("GET", "chat_members?chat_id=eq.$chatId&accepted=eq.true&select=user_id,name,role&order=joined_at.asc")
+    private val reps = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
+
+    /** User ids of the confirmed class reps of a group (cached until the app restarts). */
+    suspend fun classReps(groupId: String): Set<String> {
+        reps[groupId]?.let { return it }
+        val query = java.net.URLEncoder.encode(groupId, "UTF-8")
+        val ids = rest("GET", "class_reps?group_id=eq.$query&select=user_id").array().mapObjects { it.optString("user_id") }.toSet()
+        reps[groupId] = ids
+        return ids
+    }
+
+    suspend fun members(chatId: String, groupId: String? = null): List<ChatMember> {
+        val repIds = groupId?.let { runCatching { classReps(it) }.getOrNull() }.orEmpty()
+        return rest("GET", "chat_members?chat_id=eq.$chatId&accepted=eq.true&select=user_id,name,role&order=joined_at.asc")
             .array().mapObjects { row ->
-                ChatMember(row.optString("user_id"), row.optString("name"), roleOf(row.optString("role")))
+                val id = row.optString("user_id")
+                ChatMember(id, row.optString("name"), roleOf(row.optString("role")), id in repIds)
             }
+    }
 
     suspend fun setRole(chatId: String, userId: String, role: String) {
         rpc("set_member_role", JSONObject().put("p_chat", chatId).put("p_user", userId).put("p_role", role))
@@ -479,6 +495,7 @@ object ChatStore {
             unread = row.optInt("unread"),
             pinnedBody = row.stringOrNull("pinned_body"),
             pinnedAuthor = row.stringOrNull("pinned_author"),
+            rep = row.optBoolean("rep"),
         )
     }
 
@@ -498,6 +515,7 @@ object ChatStore {
         .put("unread", chat.unread)
         .put("pinned_body", chat.pinnedBody ?: JSONObject.NULL)
         .put("pinned_author", chat.pinnedAuthor ?: JSONObject.NULL)
+        .put("rep", chat.rep)
 
     private fun messageOf(row: JSONObject, status: String): ChatMessage? {
         val chatId = row.optString("chat_id")

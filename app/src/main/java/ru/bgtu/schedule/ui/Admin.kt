@@ -52,23 +52,40 @@ import ru.bgtu.schedule.data.ApiFailure
 
 private fun stamp(value: String?): String = value?.take(16)?.replace('T', ' ').orEmpty()
 
-/** Ban form: days (0 = forever), reason, and an optional extra checkbox. */
+/** What the moderator filled in: [days] null = forever, [scope] is the restricted action or `all`. */
+data class BanForm(val days: Int?, val reason: String, val extra: Boolean, val scope: String) {
+    fun fields(): Map<String, Any?> = mapOf("days" to days, "reason" to reason, "scope" to scope)
+}
+
+private val BAN_SCOPES = listOf("all", "reviews", "votes", "reports", "chat", "chat_create")
+
+/** Ban form: what to restrict, days (0 = forever), reason, and an optional extra checkbox. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun BanSheet(
     withHideAll: Boolean = false,
     withDelete: Boolean = false,
+    defaultScope: String = "all",
     onDismiss: () -> Unit,
-    onBan: suspend (days: Int?, reason: String, extra: Boolean) -> Unit,
+    onBan: suspend (BanForm) -> Unit,
 ) {
     val s = S
     val scope = rememberCoroutineScope()
     var days by remember { mutableStateOf("7") }
     var reason by remember { mutableStateOf("") }
     var extra by remember { mutableStateOf(true) }
+    var what by remember { mutableStateOf(defaultScope) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     BottomSheet(onDismiss) {
         Text(s.more.ban, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Text(s.acc.banWhat, color = Muted, fontSize = 13.sp)
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            BAN_SCOPES.forEach { item -> FilterChip(s.acc.scopeLabel(item), what == item) { what = item } }
+        }
         InputField(days, { value -> days = value.filter { it.isDigit() }.take(4) }, s.more.banDays, keyboard = KeyboardType.Number)
         InputField(reason, { reason = it.take(200) }, s.more.banReason)
         if (withHideAll || withDelete) {
@@ -88,11 +105,11 @@ fun BanSheet(
                     error = null
                     scope.launch {
                         try {
-                            onBan(days.toIntOrNull()?.takeIf { it > 0 }, reason.trim(), extra)
+                            onBan(BanForm(days.toIntOrNull()?.takeIf { it > 0 }, reason.trim(), extra, what))
                             Toasts.show(s.more.adminDone)
                             onDismiss()
                         } catch (failure: ApiFailure) {
-                            error = s.errorText(failure.code)
+                            error = s.failureText(failure)
                         } finally {
                             busy = false
                         }
@@ -141,7 +158,7 @@ fun AnnouncementsBanner() {
     }
 }
 
-private enum class AdminTab { STATS, REPORTS, REVIEWS, MESSAGES, BANS, ANNOUNCEMENTS, USERS, LOG }
+private enum class AdminTab { STATS, REPORTS, REVIEWS, MESSAGES, BANS, REPS, ANNOUNCEMENTS, USERS, LOG }
 
 /** Runs a moderation call, shows "done" or the error, then reloads the list. */
 @Composable
@@ -155,7 +172,7 @@ private fun rememberModerate(onDone: () -> Unit): (suspend () -> Unit) -> Unit {
                 Toasts.show(s.more.adminDone)
                 onDone()
             } catch (failure: ApiFailure) {
-                Toasts.show(s.errorText(failure.code))
+                Toasts.show(s.failureText(failure))
             }
         }
     }
@@ -175,7 +192,7 @@ private fun <T> Loaded(
         try {
             value = load()
         } catch (failure: ApiFailure) {
-            error = s.errorText(failure.code)
+            error = s.failureText(failure)
         }
     }
     val current = value
@@ -221,6 +238,7 @@ fun AdminScreen(onClose: () -> Unit) {
                     AdminTab.REVIEWS -> s.more.adminReviews
                     AdminTab.MESSAGES -> s.more.adminMessages
                     AdminTab.BANS -> s.more.adminBans
+                    AdminTab.REPS -> s.acc.adminReps
                     AdminTab.ANNOUNCEMENTS -> s.more.adminAnnouncements
                     AdminTab.USERS -> s.more.adminUsers
                     AdminTab.LOG -> s.more.adminLog
@@ -236,6 +254,7 @@ fun AdminScreen(onClose: () -> Unit) {
                 AdminTab.REVIEWS -> ReviewsTab(reload, moderate)
                 AdminTab.MESSAGES -> MessagesTab(reload, moderate)
                 AdminTab.BANS -> BansTab(reload, moderate)
+                AdminTab.REPS -> RepsTab(reload, moderate)
                 AdminTab.ANNOUNCEMENTS -> AnnouncementsTab(reload, moderate)
                 AdminTab.USERS -> UsersTab(reload, moderate)
                 AdminTab.LOG -> LogTab(reload)
@@ -284,7 +303,7 @@ private fun AdminSignIn() {
                         AdminApi.signIn(password)
                         password = ""
                     } catch (failure: ApiFailure) {
-                        error = s.errorText(failure.code)
+                        error = s.failureText(failure)
                     } finally {
                         busy = false
                     }
@@ -325,6 +344,7 @@ private fun StatsTab(reload: Int) {
                     DetailRow(s.more.statVotes, stats.votes.toString())
                     DetailRow(s.more.statReports, stats.openReports.toString())
                     DetailRow(s.more.statBans, stats.activeBans.toString())
+                    DetailRow(s.acc.statPendingReps, stats.pendingReps.toString())
                     DetailRow(s.more.statAnnouncements, stats.announcements.toString())
                     if (stats.chatEnabled) {
                         DetailRow(s.more.statChats, stats.chats?.toString() ?: "—")
@@ -417,8 +437,8 @@ private fun ReviewsTab(reload: Int, moderate: (suspend () -> Unit) -> Unit) {
         }
     }
     banning?.let { id ->
-        BanSheet(withHideAll = true, onDismiss = { banning = null }) { days, reason, extra ->
-            AdminApi.action("ban.review", mapOf("id" to id, "days" to days, "reason" to reason, "hideAll" to extra))
+        BanSheet(withHideAll = true, defaultScope = "reviews", onDismiss = { banning = null }) { form ->
+            AdminApi.action("ban.review", form.fields() + mapOf("id" to id, "hideAll" to form.extra))
         }
     }
     deleting?.let { id ->
@@ -451,8 +471,8 @@ private fun MessagesTab(reload: Int, moderate: (suspend () -> Unit) -> Unit) {
         }
     }
     banning?.let { id ->
-        BanSheet(withDelete = true, onDismiss = { banning = null }) { days, reason, extra ->
-            AdminApi.action("ban.message", mapOf("id" to id, "days" to days, "reason" to reason, "deleteMessage" to extra))
+        BanSheet(withDelete = true, defaultScope = "chat", onDismiss = { banning = null }) { form ->
+            AdminApi.action("ban.message", form.fields() + mapOf("id" to id, "deleteMessage" to form.extra))
         }
     }
 }
@@ -471,6 +491,7 @@ private fun BansTab(reload: Int, moderate: (suspend () -> Unit) -> Unit) {
                         else -> ban.name ?: ban.userId.orEmpty()
                     }
                     Text(who, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(s.acc.scopeLabel(ban.scope), color = Red, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                     if (ban.reason.isNotBlank()) Text(ban.reason, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
                     Text(
                         "${stamp(ban.createdAt)} · ${ban.until?.let { "${s.more.until} ${stamp(it)}" } ?: s.more.forever}",
@@ -541,6 +562,7 @@ private fun UsersTab(reload: Int, moderate: (suspend () -> Unit) -> Unit) {
     var applied by remember { mutableStateOf("") }
     var banning by remember { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
+    var opened by remember { mutableStateOf<String?>(null) }
     Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         InputField(query, { query = it.take(80) }, s.more.adminSearch, modifier = Modifier.weight(1f))
         TextButton(onClick = { applied = query.trim() }) { Text(s.more.find, color = Blue) }
@@ -562,14 +584,18 @@ private fun UsersTab(reload: Int, moderate: (suspend () -> Unit) -> Unit) {
                         "Google".takeIf { user.google },
                     ).joinToString(", ")
                     Text(
-                        "ID ${user.id.replace("-", "").take(8).uppercase()} · $ways" + if (user.banned) " · ${s.more.ban}" else "",
+                        "ID ${user.id.replace("-", "").take(8).uppercase()} · $ways" +
+                            (if (user.banned) " · ${s.more.ban}" else "") +
+                            (if (user.restricted) " · ${s.acc.restrictedMark}" else "") +
+                            (if (user.rep) " · ${s.more.roleRep}" else ""),
                         color = Muted,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                     Text("${stamp(user.createdAt)} → ${stamp(user.seenAt)}", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                     Row {
-                        TextButton(onClick = { banning = user.id }) { Text(s.more.ban, color = Red) }
+                        TextButton(onClick = { opened = user.id }) { Text(s.acc.personOpen, color = Blue) }
+                        TextButton(onClick = { banning = user.id }) { Text(s.acc.restrict, color = Red) }
                         TextButton(onClick = { deleting = user.id }) { Text(s.more.deleteForever, color = Red) }
                     }
                 }
@@ -577,13 +603,175 @@ private fun UsersTab(reload: Int, moderate: (suspend () -> Unit) -> Unit) {
         }
     }
     banning?.let { id ->
-        BanSheet(onDismiss = { banning = null }) { days, reason, _ ->
-            AdminApi.action("ban.user", mapOf("userId" to id, "days" to days, "reason" to reason))
+        BanSheet(onDismiss = { banning = null }) { form ->
+            AdminApi.action("ban.user", form.fields() + mapOf("userId" to id))
         }
     }
     deleting?.let { id ->
         ConfirmDelete(onDismiss = { deleting = null }) {
             moderate { AdminApi.action("user.delete", mapOf("userId" to id)) }
+        }
+    }
+    opened?.let { id -> PersonSheet(id, moderate) { opened = null } }
+}
+
+@Composable
+private fun RepsTab(reload: Int, moderate: (suspend () -> Unit) -> Unit) {
+    val s = S
+    var opened by remember { mutableStateOf<String?>(null) }
+    Loaded(reload, { AdminApi.reps() }) { items ->
+        AdminList {
+            if (items.isEmpty()) item { EmptyLine() }
+            items(items, key = { it.request.id }) { rep ->
+                val request = rep.request
+                SoftCard {
+                    Text(rep.name + (rep.login?.let { " @$it" } ?: ""), color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(
+                        "${request.groupId} · ${if (request.status == "pending") s.acc.repPendingMark else s.more.roleRep} · ${stamp(request.createdAt)}",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                    if (request.comment.isNotBlank()) Text(request.comment, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+                    Row {
+                        TextButton(onClick = { opened = rep.userId }) { Text(s.acc.personOpen, color = Blue) }
+                        if (request.status == "pending") {
+                            TextButton(onClick = { moderate { AdminApi.action("rep.approve", mapOf("id" to request.id)) } }) {
+                                Text(s.acc.repApprove, color = Blue)
+                            }
+                            TextButton(onClick = { moderate { AdminApi.action("rep.reject", mapOf("id" to request.id)) } }) {
+                                Text(s.acc.repReject, color = Muted)
+                            }
+                        } else {
+                            TextButton(onClick = { moderate { AdminApi.action("rep.revoke", mapOf("id" to request.id)) } }) {
+                                Text(s.acc.repRevoke, color = Red)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    opened?.let { id -> PersonSheet(id, moderate) { opened = null } }
+}
+
+/** Moderator's card of one account: activity, restrictions, reviews and messages. */
+@Composable
+private fun PersonSheet(userId: String, moderate: (suspend () -> Unit) -> Unit, onClose: () -> Unit) {
+    val s = S
+    var reload by remember { mutableIntStateOf(0) }
+    var banning by remember { mutableStateOf(false) }
+    var person by remember { mutableStateOf<ru.bgtu.schedule.data.AdminPerson?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(reload) {
+        try {
+            person = AdminApi.person(userId)
+        } catch (failure: ApiFailure) {
+            error = s.failureText(failure)
+        }
+    }
+    val act: (suspend () -> Unit) -> Unit = { body ->
+        moderate {
+            body()
+            reload++
+        }
+    }
+    BottomSheet(onDismiss = onClose) {
+        ErrorLine(error)
+        val p = person
+        if (p == null) {
+            if (error == null) CircularProgressIndicator(color = Blue, modifier = Modifier.size(28.dp))
+            return@BottomSheet
+        }
+        val user = p.user
+        Text(user.name + (user.login?.let { " @$it" } ?: ""), color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        val ways = listOfNotNull(
+            user.login?.let { s.more.passwordField },
+            "Telegram".takeIf { user.telegram },
+            "Google".takeIf { user.google },
+        ).joinToString(", ")
+        Text("ID ${user.id.replace("-", "").take(8).uppercase()} · $ways", color = Muted, fontSize = 12.sp)
+        Text("${stamp(user.createdAt)} → ${stamp(user.seenAt)}", color = Muted, fontSize = 12.sp)
+        DetailRow(s.acc.personDevices, p.devices.toString())
+        DetailRow(s.acc.personReportsSent, p.reportsSent.toString())
+        p.rep?.takeIf { it.status == "pending" || it.status == "approved" }?.let { rep ->
+            Text(
+                "${s.more.roleRep} ${rep.groupId} · ${if (rep.status == "pending") s.acc.repPendingMark else ""}",
+                color = Blue,
+                fontSize = 13.sp,
+            )
+            Row {
+                if (rep.status == "pending") {
+                    TextButton(onClick = { act { AdminApi.action("rep.approve", mapOf("id" to rep.id)) } }) { Text(s.acc.repApprove, color = Blue) }
+                    TextButton(onClick = { act { AdminApi.action("rep.reject", mapOf("id" to rep.id)) } }) { Text(s.acc.repReject, color = Muted) }
+                } else {
+                    TextButton(onClick = { act { AdminApi.action("rep.revoke", mapOf("id" to rep.id)) } }) { Text(s.acc.repRevoke, color = Red) }
+                }
+            }
+        }
+
+        Text(s.acc.personBans, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        if (p.bans.isEmpty()) EmptyLine()
+        p.bans.forEach { ban ->
+            Column {
+                Text(
+                    s.acc.scopeLabel(ban.scope) + if (!ban.active) " · ${s.acc.inactiveMark}" else "",
+                    color = if (ban.active) Red else Muted,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                )
+                if (ban.reason.isNotBlank()) Text(ban.reason, color = Ink, fontSize = 13.sp)
+                Text(
+                    "${stamp(ban.createdAt)} · ${ban.until?.let { "${s.more.until} ${stamp(it)}" } ?: s.more.forever}",
+                    color = Muted,
+                    fontSize = 11.sp,
+                )
+                if (ban.active) {
+                    TextButton(onClick = { act { AdminApi.action("ban.remove", mapOf("id" to ban.id)) } }) { Text(s.more.unban, color = Blue) }
+                }
+            }
+        }
+        PrimaryButton(s.acc.restrict, onClick = { banning = true }, color = Red)
+
+        Text(s.acc.personReviews, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        if (p.reviews.isEmpty()) EmptyLine()
+        p.reviews.forEach { review ->
+            Column {
+                Text(
+                    "${review.teacher} · ${review.overall}★ · ⚑ ${review.reports}" + if (review.hidden) " · ${s.more.hiddenMark}" else "",
+                    color = Muted,
+                    fontSize = 12.sp,
+                )
+                Text(review.text.ifBlank { "—" }, color = Ink, fontSize = 13.sp)
+                Row {
+                    val toggle = if (review.hidden) "review.unhide" else "review.hide"
+                    TextButton(onClick = { act { AdminApi.action(toggle, mapOf("id" to review.id)) } }) {
+                        Text(if (review.hidden) s.more.unhide else s.more.hide, color = Blue)
+                    }
+                    TextButton(onClick = { act { AdminApi.action("review.delete", mapOf("id" to review.id)) } }) {
+                        Text(s.more.deleteForever, color = Red)
+                    }
+                }
+            }
+        }
+
+        if (p.messages.isNotEmpty()) {
+            Text(s.acc.personMessages, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            p.messages.forEach { message ->
+                Column {
+                    Text("${message.chat} · ${stamp(message.createdAt)}", color = Muted, fontSize = 12.sp)
+                    Text(message.body, color = Ink, fontSize = 13.sp)
+                    TextButton(onClick = { act { AdminApi.action("message.delete", mapOf("id" to message.id)) } }) {
+                        Text(s.more.deleteForever, color = Red)
+                    }
+                }
+            }
+        }
+    }
+    if (banning) {
+        BanSheet(onDismiss = { banning = false }) { form ->
+            AdminApi.action("ban.user", form.fields() + mapOf("userId" to userId))
+            reload++
         }
     }
 }

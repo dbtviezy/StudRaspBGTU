@@ -241,6 +241,20 @@ private fun InfoBox(text: String) {
 }
 
 @Composable
+private fun RestrictionBar(text: String) {
+    Text(
+        text,
+        color = Ink,
+        fontSize = 13.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(RedSoft)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
 private fun OfflineBar(rounded: Boolean = false) {
     Text(
         S.more.offlineBanner,
@@ -377,7 +391,7 @@ private fun ChatFormSheet(kind: ChatForm, groupId: String, onClose: () -> Unit, 
                             onClose()
                             onOpened(chat)
                         } catch (failure: ApiFailure) {
-                            error = s.errorText(failure.code)
+                            error = s.failureText(failure)
                         } finally {
                             busy = false
                         }
@@ -413,6 +427,11 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
     var sheet by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val lastId = messages.maxOfOrNull { it.id ?: 0L } ?: 0L
+    var reps by remember(chatId) { mutableStateOf<Set<String>>(emptySet()) }
+    val repGroup = chat?.groupId?.takeIf { !chat.isDirect }
+    LaunchedEffect(repGroup) {
+        if (repGroup != null) runCatching { ChatStore.classReps(repGroup) }.onSuccess { reps = it }
+    }
 
     LaunchedEffect(chatId) {
         ru.bgtu.schedule.notify.ChatNotify.cancelFor(context, chatId)
@@ -431,7 +450,7 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
                 error = null
             } catch (failure: ApiFailure) {
                 offline = failure.code in OFFLINE_CODES
-                if (!offline) error = s.errorText(failure.code)
+                if (!offline) error = s.failureText(failure)
             }
         }
     }
@@ -447,7 +466,7 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
             try {
                 body()
             } catch (failure: ApiFailure) {
-                Toasts.show(s.errorText(failure.code))
+                Toasts.show(s.failureText(failure))
             }
         }
     }
@@ -490,6 +509,7 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
                 PinnedBar(chat, onUnpin = if (chat.isStaff) ({ guarded { ChatStore.pin(chatId, null) } }) else null)
             }
             if (offline) OfflineBar()
+            account.restriction("chat")?.let { RestrictionBar(s.restrictionText(it)) }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -523,6 +543,7 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
                         message = message,
                         mine = message.userId == me || message.id == null,
                         showAuthor = chat?.isDirect == false,
+                        rep = message.userId in reps,
                         onMenu = { menu = message },
                     )
                 }
@@ -640,13 +661,13 @@ private fun ChatView(chatId: String, onClose: () -> Unit, onOpenChat: (ChatInfo)
     reporting?.let { message ->
         ReportSheet(
             onDismiss = { reporting = null },
-            onSend = { reason -> RatingApi.report(context, "message", message.id ?: 0L, reason, Account.current.token) },
+            onSend = { reason -> RatingApi.report(context, "message", message.id ?: 0L, reason) },
         )
     }
     banning?.let { message ->
-        BanSheet(withDelete = true, onDismiss = { banning = null }) { days, reason, extra ->
-            AdminApi.action("ban.message", mapOf("id" to message.id, "days" to days, "reason" to reason, "deleteMessage" to extra))
-            if (extra) message.id?.let { ChatStore.forgetMessage(chatId, it) }
+        BanSheet(withDelete = true, defaultScope = "chat", onDismiss = { banning = null }) { form ->
+            AdminApi.action("ban.message", form.fields() + mapOf("id" to message.id, "deleteMessage" to form.extra))
+            if (form.extra) message.id?.let { ChatStore.forgetMessage(chatId, it) }
         }
     }
     if (actions) {
@@ -704,7 +725,7 @@ private fun MenuItem(text: String, danger: Boolean = false, onClick: () -> Unit)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Bubble(message: ChatMessage, mine: Boolean, showAuthor: Boolean, onMenu: () -> Unit) {
+private fun Bubble(message: ChatMessage, mine: Boolean, showAuthor: Boolean, rep: Boolean = false, onMenu: () -> Unit) {
     val s = S
     val meta = when {
         message.pending -> s.more.pendingMessage
@@ -735,7 +756,10 @@ private fun Bubble(message: ChatMessage, mine: Boolean, showAuthor: Boolean, onM
         ) {
             val ink = if (mine && !message.failed) androidx.compose.ui.graphics.Color.White else Ink
             if (showAuthor && !mine) {
-                Text(message.author, color = Blue, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(message.author, color = Blue, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    if (rep) RepBadge()
+                }
             }
             Text(if (mine) message.body else censor(message.body), color = ink, fontSize = 15.sp, lineHeight = 20.sp)
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.End).padding(top = 2.dp)) {
@@ -776,7 +800,7 @@ private fun InviteSheet(chat: ChatInfo, onClose: () -> Unit) {
                         try {
                             code = ChatStore.regenerateInvite(chat.id)
                         } catch (failure: ApiFailure) {
-                            error = s.errorText(failure.code)
+                            error = s.failureText(failure)
                         }
                     }
                 }) { Text(s.more.newInviteCode, color = Muted) }

@@ -7,8 +7,11 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Error code from the server (`{"error": "..."}`) or `offline` when the request did not reach it. */
-class ApiFailure(val code: String) : Exception(code)
+/**
+ * Error code from the server (`{"error": "..."}`) or `offline` when the request did not reach it.
+ * [extra] holds the other fields of the error body, e.g. `scope`, `until`, `reason` of a restriction.
+ */
+class ApiFailure(val code: String, val extra: JSONObject = JSONObject()) : Exception(code)
 
 data class HttpReply(val status: Int, val body: String) {
     val ok: Boolean get() = status in 200..299
@@ -21,10 +24,20 @@ data class HttpReply(val status: Int, val body: String) {
         val code = json()?.optString("error").orEmpty()
         return code.ifBlank { if (status >= 500) "server_error" else "bad_request" }
     }
+
+    fun failure(): ApiFailure = ApiFailure(errorCode(), json() ?: JSONObject())
 }
 
 object Http {
     const val BASE_URL = "https://studraspbgtu-web.vercel.app"
+
+    /** Shown in «Мои устройства». */
+    private val deviceName: String by lazy {
+        val maker = android.os.Build.MANUFACTURER.orEmpty().replaceFirstChar { it.uppercase() }
+        val model = android.os.Build.MODEL.orEmpty()
+        val name = if (model.startsWith(maker, ignoreCase = true)) model else "$maker $model"
+        "${name.trim()} · Android".take(80)
+    }
 
     /** Returns null when the server could not be reached at all. */
     suspend fun call(
@@ -41,6 +54,9 @@ object Http {
                 connection.readTimeout = 12000
                 connection.useCaches = false
                 connection.setRequestProperty("Accept", "application/json")
+                if (!url.startsWith("http")) {
+                    connection.setRequestProperty("X-Device-Name", java.net.URLEncoder.encode(deviceName, "UTF-8"))
+                }
                 headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
                 if (body != null) {
                     connection.doOutput = true
@@ -64,7 +80,7 @@ object Http {
         headers: Map<String, String> = emptyMap(),
     ): JSONObject {
         val reply = call(method, path, body?.toString(), headers) ?: throw ApiFailure("offline")
-        if (!reply.ok) throw ApiFailure(reply.errorCode())
+        if (!reply.ok) throw reply.failure()
         return reply.json() ?: JSONObject()
     }
 }

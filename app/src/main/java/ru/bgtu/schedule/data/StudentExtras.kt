@@ -37,6 +37,10 @@ class HiddenStore(context: Context) {
         sp.edit().putStringSet(KEY, next).apply()
     }
 
+    fun replaceAll(keys: Collection<String>) {
+        sp.edit().putStringSet(KEY, keys.filter { it.isNotBlank() }.toSet()).apply()
+    }
+
     companion object {
         private const val FILE = "bgtu_hidden"
         private const val KEY = "keys"

@@ -88,6 +88,16 @@ export function forgetSync() {
   setStatus({ at: null, failed: false });
 }
 
+/** JSON with sorted object keys, so equal values from the server and from this device compare equal. */
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stable(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
 const keyOf = (s: string, k: string) => `${s}${SEP}${k}`;
 
 function todoValue(item: TodoItem) {
@@ -105,7 +115,7 @@ function todoValue(item: TodoItem) {
 function collect(d: Data): Map<string, string> {
   const out = new Map<string, string>();
   const put = (s: Section, k: string, v: unknown) => {
-    if (k) out.set(keyOf(s, k), JSON.stringify(v));
+    if (k) out.set(keyOf(s, k), stable(v));
   };
   d.favoriteTeachers.forEach((name) => put("fav", name, true));
   if (d.group) put("profile", "group", d.group);
@@ -259,7 +269,7 @@ function snapshotOf(base: Record<string, string>, items: Item[]): Record<string,
   const next = { ...base };
   for (const { s, k, v } of items) {
     if (v == null) delete next[keyOf(s, k)];
-    else next[keyOf(s, k)] = JSON.stringify(v);
+    else next[keyOf(s, k)] = stable(v);
   }
   return next;
 }
@@ -269,7 +279,7 @@ const hasData = (keys: Iterable<string>) => [...keys].some((key) => DATA_SECTION
 async function firstSync(userId: string) {
   const first = await post(0, []);
   const server = first.items.filter((item) => item.v != null);
-  const serverKeys = new Map(server.map((item) => [keyOf(item.s, item.k), JSON.stringify(item.v)]));
+  const serverKeys = new Map(server.map((item) => [keyOf(item.s, item.k), stable(item.v)]));
   const local = collect(getState());
   const differs = [...local].some(([key, value]) => DATA_SECTIONS.includes(split(key)[0]) && serverKeys.get(key) !== value)
     || [...serverKeys].some(([key, value]) => DATA_SECTIONS.includes(split(key)[0]) && local.get(key) !== value);
@@ -327,7 +337,7 @@ async function regularSync(saved: Saved) {
   const reply = await post(saved.cursor, changes);
   apply(reply.items.filter((item) => {
     const mine = changes.find((c) => c.s === item.s && c.k === item.k);
-    return !mine || JSON.stringify(mine.v) !== JSON.stringify(item.v);
+    return !mine || stable(mine.v) !== stable(item.v);
   }));
   const at = new Date().toISOString();
   save({ userId: saved.userId, cursor: reply.cursor, snapshot: snapshotOf(saved.snapshot, [...changes, ...reply.items]), at });

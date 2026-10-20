@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import ru.bgtu.schedule.data.Account
 import ru.bgtu.schedule.data.AdminApi
 import ru.bgtu.schedule.data.ChatStore
+import ru.bgtu.schedule.data.Sync
 import ru.bgtu.schedule.notify.ChatNotify
 import ru.bgtu.schedule.ui.AppSignals
 import ru.bgtu.schedule.ui.BgtuApp
@@ -41,12 +42,14 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         ChatNotify.foreground = true
+        Sync.syncSoon(this)
     }
 
     override fun onStop() {
         super.onStop()
         ChatNotify.foreground = false
         ChatNotify.markSeen(this)
+        Sync.syncSoon(this)
     }
 
     private fun openChatFrom(intent: Intent?) {

@@ -23,6 +23,7 @@ data class AdminStats(
     val chats: Int?,
     val messages: Int?,
     val chatEnabled: Boolean,
+    val pendingReps: Int = 0,
 )
 
 data class AdminReport(
@@ -65,6 +66,9 @@ data class AdminBan(
     val reason: String,
     val createdAt: String?,
     val until: String?,
+    /** all, reviews, votes, reports, chat or chat_create. */
+    val scope: String = "all",
+    val active: Boolean = true,
 )
 
 data class AdminLogEntry(val id: Long, val action: String, val target: String, val detail: String, val createdAt: String?)
@@ -80,7 +84,24 @@ data class AdminUser(
     val createdAt: String?,
     val seenAt: String?,
     val banned: Boolean,
+    val restricted: Boolean = false,
+    val rep: Boolean = false,
 )
+
+data class AdminPersonReview(val id: Long, val teacher: String, val overall: Int, val text: String, val hidden: Boolean, val updatedAt: String?, val reports: Int)
+
+/** Everything about one account for the moderator's card. */
+data class AdminPerson(
+    val user: AdminUser,
+    val devices: Int,
+    val reportsSent: Int,
+    val reviews: List<AdminPersonReview>,
+    val messages: List<AdminMessage>,
+    val bans: List<AdminBan>,
+    val rep: RepRequest?,
+)
+
+data class AdminRep(val request: RepRequest, val userId: String, val name: String, val login: String?)
 
 /** Moderation API; only the admin build signs in here, with the password from ADMIN_PASSWORD on the server. */
 object AdminApi {
@@ -119,13 +140,78 @@ object AdminApi {
         val current = tokenFlow.value ?: throw ApiFailure("unauthorized")
         val reply = Http.call(method, path, body?.toString(), mapOf("X-Admin-Token" to current)) ?: throw ApiFailure("offline")
         if (reply.status == 401) signOut()
-        if (!reply.ok) throw ApiFailure(reply.errorCode())
+        if (!reply.ok) throw reply.failure()
         return reply.json() ?: JSONObject()
     }
 
-    private suspend fun view(name: String, query: String = ""): JSONObject {
+    private suspend fun view(name: String, query: String = "", id: String? = null): JSONObject {
         val q = if (query.isBlank()) "" else "&q=${URLEncoder.encode(query.trim(), "UTF-8")}"
-        return call("GET", "/api/admin?view=$name$q")
+        val target = id?.let { "&id=${URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
+        return call("GET", "/api/admin?view=$name$q$target")
+    }
+
+    private fun banOf(item: JSONObject) = AdminBan(
+        id = item.optLong("id"),
+        userId = item.stringOrNull("userId"),
+        device = item.optBoolean("device"),
+        name = item.stringOrNull("name"),
+        login = item.stringOrNull("login"),
+        reason = item.optString("reason"),
+        createdAt = item.stringOrNull("createdAt"),
+        until = item.stringOrNull("until"),
+        scope = item.optString("scope", "all"),
+        active = item.optBoolean("active", true),
+    )
+
+    private fun messageOf(item: JSONObject) = AdminMessage(
+        id = item.optLong("id"),
+        chatId = item.optString("chatId"),
+        userId = item.optString("userId"),
+        author = item.optString("author"),
+        body = item.optString("body"),
+        createdAt = item.stringOrNull("createdAt"),
+        chat = item.optString("chat"),
+    )
+
+    private fun userOf(item: JSONObject) = AdminUser(
+        id = item.optString("id"),
+        name = item.optString("name"),
+        login = item.stringOrNull("login"),
+        telegram = item.optBoolean("telegram"),
+        google = item.optBoolean("google"),
+        createdAt = item.stringOrNull("createdAt"),
+        seenAt = item.stringOrNull("seenAt"),
+        banned = item.optBoolean("banned"),
+        restricted = item.optBoolean("restricted"),
+        rep = item.optBoolean("rep"),
+    )
+
+    suspend fun person(id: String): AdminPerson {
+        val root = view("user", id = id)
+        return AdminPerson(
+            user = userOf(root.optJSONObject("user") ?: JSONObject()),
+            devices = root.optInt("devices"),
+            reportsSent = root.optInt("reportsSent"),
+            reviews = root.optJSONArray("reviews").mapObjects {
+                AdminPersonReview(
+                    id = it.optLong("id"),
+                    teacher = it.optString("teacher"),
+                    overall = it.optInt("overall"),
+                    text = it.optString("text"),
+                    hidden = it.optBoolean("hidden"),
+                    updatedAt = it.stringOrNull("updatedAt"),
+                    reports = it.optInt("reports"),
+                )
+            },
+            messages = root.optJSONArray("messages").mapObjects { messageOf(it) },
+            bans = root.optJSONArray("bans").mapObjects { banOf(it) },
+            rep = RepRequest.of(root.optJSONObject("rep")),
+        )
+    }
+
+    suspend fun reps(): List<AdminRep> = view("reps").optJSONArray("items").mapObjects { item ->
+        val request = RepRequest.of(item) ?: return@mapObjects null
+        AdminRep(request, item.optString("userId"), item.optString("name"), item.stringOrNull("login"))
     }
 
     suspend fun action(name: String, fields: Map<String, Any?> = emptyMap()) {
@@ -150,6 +236,7 @@ object AdminApi {
             chats = if (root.isNull("chats")) null else root.optInt("chats"),
             messages = if (root.isNull("messages")) null else root.optInt("messages"),
             chatEnabled = root.optBoolean("chatEnabled"),
+            pendingReps = root.optInt("pendingReps"),
         )
     }
 
@@ -179,30 +266,9 @@ object AdminApi {
         )
     }
 
-    suspend fun messages(): List<AdminMessage> = view("messages").optJSONArray("items").mapObjects { item ->
-        AdminMessage(
-            id = item.optLong("id"),
-            chatId = item.optString("chatId"),
-            userId = item.optString("userId"),
-            author = item.optString("author"),
-            body = item.optString("body"),
-            createdAt = item.stringOrNull("createdAt"),
-            chat = item.optString("chat"),
-        )
-    }
+    suspend fun messages(): List<AdminMessage> = view("messages").optJSONArray("items").mapObjects { messageOf(it) }
 
-    suspend fun bans(): List<AdminBan> = view("bans").optJSONArray("items").mapObjects { item ->
-        AdminBan(
-            id = item.optLong("id"),
-            userId = item.stringOrNull("userId"),
-            device = item.optBoolean("device"),
-            name = item.stringOrNull("name"),
-            login = item.stringOrNull("login"),
-            reason = item.optString("reason"),
-            createdAt = item.stringOrNull("createdAt"),
-            until = item.stringOrNull("until"),
-        )
-    }
+    suspend fun bans(): List<AdminBan> = view("bans").optJSONArray("items").mapObjects { banOf(it) }
 
     suspend fun announcements(): List<Announcement> = view("announcements").optJSONArray("items").mapObjects { item ->
         Announcement(
@@ -214,18 +280,7 @@ object AdminApi {
         )
     }
 
-    suspend fun users(query: String): List<AdminUser> = view("users", query).optJSONArray("items").mapObjects { item ->
-        AdminUser(
-            id = item.optString("id"),
-            name = item.optString("name"),
-            login = item.stringOrNull("login"),
-            telegram = item.optBoolean("telegram"),
-            google = item.optBoolean("google"),
-            createdAt = item.stringOrNull("createdAt"),
-            seenAt = item.stringOrNull("seenAt"),
-            banned = item.optBoolean("banned"),
-        )
-    }
+    suspend fun users(query: String): List<AdminUser> = view("users", query).optJSONArray("items").mapObjects { userOf(it) }
 
     suspend fun log(): List<AdminLogEntry> = view("log").optJSONArray("items").mapObjects { item ->
         AdminLogEntry(

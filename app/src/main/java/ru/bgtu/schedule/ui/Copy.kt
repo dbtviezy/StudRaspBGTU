@@ -394,6 +394,22 @@ data class Copy(
 
     val more: MoreCopy get() = if (code == "en") MoreEn else MoreRu
 
+    val acc: AccountCopy get() = if (code == "en") AccountEn else AccountRu
+
+    /** Like [errorText], but spells out restrictions (what, until when, why) from the error details. */
+    fun failureText(failure: ru.bgtu.schedule.data.ApiFailure): String {
+        val extra = failure.extra
+        if ((failure.code == "restricted" || failure.code == "banned") && extra.has("scope")) {
+            val until = if (extra.isNull("until")) null else extra.optString("until").ifBlank { null }
+            return acc.restrictionText(extra.optString("scope"), until, extra.optString("reason"), more.banned)
+        }
+        if (failure.code == "account_too_new" && extra.optString("until").isNotBlank()) return acc.accountTooNew(extra.optString("until"))
+        return errorText(failure.code)
+    }
+
+    fun restrictionText(restriction: ru.bgtu.schedule.data.Restriction): String =
+        acc.restrictionText(restriction.scope, restriction.until, restriction.reason, more.banned)
+
     fun periodLabel(raw: String): String =
         if (code == "en") raw.replace(Regex("""(\d+)\s*семестр"""), "semester $1").replace("семестр", "semester") else raw
 
@@ -436,6 +452,12 @@ data class Copy(
         "already_linked" -> more.alreadyLinked
         "last_method" -> more.lastMethod
         "banned" -> more.banned
+        "restricted" -> more.forbidden
+        "muted" -> acc.muted
+        "no_create" -> acc.noCreate
+        "social_required", "account_too_new" -> acc.socialRequired
+        "device_used" -> acc.deviceUsed
+        "already_rep" -> acc.alreadyRep
         "own_review" -> more.ownReview
         "invalid_code" -> more.invalidCode
         "user_not_found" -> more.userNotFound

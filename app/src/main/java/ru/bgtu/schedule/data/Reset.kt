@@ -11,6 +11,7 @@ private val USER_PREFS = listOf(
     "bgtu_absence_limits",
     "bgtu_todos",
     "bgtu_announcements",
+    "bgtu_sync",
 )
 
 fun wipeUserData(context: Context, deleteFiles: Boolean) {

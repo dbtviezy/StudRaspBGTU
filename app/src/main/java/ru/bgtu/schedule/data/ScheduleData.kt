@@ -183,6 +183,13 @@ class Prefs(context: Context) {
         sp.edit().putString(KEY_SEEN_VERSION, value).apply()
     }
 
+    /** The one-time «Войдите в аккаунт» offer was shown. */
+    fun loginOffered(): Boolean = sp.getBoolean(KEY_LOGIN_OFFERED, false)
+
+    fun setLoginOffered() {
+        sp.edit().putBoolean(KEY_LOGIN_OFFERED, true).apply()
+    }
+
     fun clearProfile() {
         sp.edit().remove(KEY_GROUP).remove(KEY_NAME).apply()
     }
@@ -278,6 +285,7 @@ class Prefs(context: Context) {
         private const val KEY_CHAT_NOTIFY = "chat_notify"
         private const val KEY_ONGOING = "ongoing_lesson"
         private const val KEY_SEEN_VERSION = "seen_version"
+        private const val KEY_LOGIN_OFFERED = "login_offered"
 
         private fun noteKey(date: String, lessonKey: String) = "note|$date|$lessonKey"
     }

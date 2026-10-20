@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.AlertDialog
@@ -26,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,7 +45,11 @@ import ru.bgtu.schedule.data.Account
 import ru.bgtu.schedule.data.ApiFailure
 import ru.bgtu.schedule.data.AuthConfig
 import ru.bgtu.schedule.data.ChatStore
+import ru.bgtu.schedule.data.DeviceSession
+import ru.bgtu.schedule.data.MyReview
 import ru.bgtu.schedule.data.Prefs
+import ru.bgtu.schedule.data.RatingApi
+import ru.bgtu.schedule.data.Sync
 
 /** Loads the server's sign-in options; null while loading, failure code when the server is unreachable. */
 @Composable
@@ -80,7 +86,7 @@ private fun rememberAction(): Pair<AccountAction, (suspend () -> Unit, () -> Uni
                     body()
                     after()
                 } catch (failure: ApiFailure) {
-                    action.error = s.errorText(failure.code)
+                    action.error = s.failureText(failure)
                 } finally {
                     action.busy = false
                 }
@@ -205,28 +211,37 @@ private fun EditSheet(kind: EditKind, onClose: () -> Unit) {
 /** Account card on the profile screen, same layout as the web one. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AccountCard(onOpenChats: () -> Unit = {}) {
+fun AccountCard(groupId: String? = null, onOpenChats: () -> Unit = {}) {
     val s = S
+    val context = LocalContext.current
     val state by Account.state.collectAsState()
     val user = state.user
     var signing by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<EditKind?>(null) }
     var deleting by remember { mutableStateOf(false) }
+    var askReviews by remember { mutableStateOf(false) }
+    var sheet by remember { mutableStateOf<String?>(null) }
     val (action, run) = rememberAction()
 
     if (user == null || !state.signedIn) {
+        var warning by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) {
+            val claimable = RatingApi.claimable(context)
+            if (claimable != null && claimable.count > 0) warning = s.acc.legacyWarn(claimable.until)
+        }
         SoftCard {
             Text(s.more.account, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
             Text(s.more.accountHint, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+            warning?.let { Text(it, color = StarYellow, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
             PrimaryButton(s.more.signIn, onClick = { signing = true }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
         }
         if (signing) SignInSheet(onClose = { signing = false })
         return
     }
 
-    fun leave(everywhere: Boolean = false, deleteAccount: Boolean = false) {
+    fun leave(everywhere: Boolean = false, deleteAccount: Boolean = false, keepReviews: Boolean = false) {
         run({
-            Account.signOut(everywhere, deleteAccount)
+            Account.signOut(everywhere, deleteAccount, keepReviews)
             ChatStore.clear()
         }, {
             if (everywhere) Toasts.show(s.more.signOut)
@@ -267,7 +282,19 @@ fun AccountCard(onOpenChats: () -> Unit = {}) {
         }
         ErrorLine(action.error)
 
+        if (state.restrictions.isNotEmpty()) {
+            Text(s.acc.restrictionsTitle, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 12.dp))
+            state.restrictions.forEach { Text(s.restrictionText(it), color = Red, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
+        }
+        SyncBlock()
+        RepBlock(groupId)
+
         FlowRow(Modifier.padding(top = 8.dp)) {
+            TextButton(onClick = { sheet = "reviews" }) { Text(s.acc.myReviews, color = Blue) }
+            TextButton(onClick = { sheet = "devices" }) { Text(s.acc.devices, color = Blue) }
+        }
+
+        FlowRow {
             if (user.login != null) {
                 TextButton(onClick = { editing = EditKind.PASSWORD }) { Text(s.more.changePassword, color = Blue) }
             } else {
@@ -293,10 +320,194 @@ fun AccountCard(onOpenChats: () -> Unit = {}) {
             confirmButton = {
                 TextButton(onClick = {
                     deleting = false
-                    leave(deleteAccount = true)
+                    askReviews = true
                 }) { Text(s.delete, color = Red) }
             },
         )
+    }
+    if (askReviews) {
+        BottomSheet(onDismiss = { askReviews = false }) {
+            Text(s.more.deleteAccount, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Text(s.acc.deleteReviewsQuestion, color = Muted, fontSize = 13.sp)
+            OutlineButton(s.acc.keepReviewsAnon, onClick = {
+                askReviews = false
+                leave(deleteAccount = true, keepReviews = true)
+            })
+            OutlineButton(s.acc.deleteWithReviews, color = Red, onClick = {
+                askReviews = false
+                leave(deleteAccount = true, keepReviews = false)
+            })
+            TextButton(onClick = { askReviews = false }, modifier = Modifier.align(Alignment.End)) { Text(s.cancel, color = Muted) }
+        }
+    }
+    when (sheet) {
+        "reviews" -> MyReviewsSheet { sheet = null }
+        "devices" -> DevicesSheet { sheet = null }
+    }
+}
+
+@Composable
+private fun SyncBlock() {
+    val s = S
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val status by Sync.status.collectAsState()
+    val at = status.at ?: remember(status.busy) { Sync.lastAt(context) }
+    Text(s.acc.syncTitle, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 12.dp))
+    Text(s.acc.syncHint, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            when {
+                status.failed -> s.acc.syncFailed
+                at != null -> s.acc.syncDone(at)
+                else -> ""
+            },
+            color = if (status.failed) Red else Muted,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(enabled = !status.busy, onClick = { scope.launch { Sync.run(context.applicationContext) } }) {
+            Text(s.acc.syncNow, color = Blue)
+        }
+    }
+}
+
+@Composable
+private fun RepBlock(groupId: String?) {
+    val s = S
+    val state by Account.state.collectAsState()
+    val (action, run) = rememberAction()
+    var writing by remember { mutableStateOf(false) }
+    var comment by remember { mutableStateOf("") }
+    val rep = state.rep
+    val current = rep?.takeIf { it.status == "pending" || it.status == "approved" }
+    Text(s.acc.repTitle, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 12.dp))
+    Text(s.acc.repHint, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+    if (current != null && current.status == "approved") {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+            Text(s.acc.repApproved(current.groupId), color = Ink, fontSize = 13.sp)
+            RepBadge()
+        }
+    } else if (current != null) {
+        Text(s.acc.repPending(current.groupId), color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+    } else if (rep?.status == "rejected") {
+        Text(s.acc.repRejected, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+    }
+    when {
+        current != null -> TextButton(enabled = !action.busy, onClick = { run({ Account.cancelRep() }, {}) }) {
+            Text(if (current.status == "approved") s.acc.repStepDown else s.acc.repCancel, color = Muted)
+        }
+        groupId.isNullOrBlank() -> Text(s.acc.repNoGroup, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        writing -> {
+            InputField(comment, { comment = it.take(300) }, s.acc.repComment, singleLine = false, minLines = 3, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { writing = false }) { Text(s.cancel, color = Muted) }
+                TextButton(enabled = !action.busy, onClick = {
+                    run({ Account.requestRep(groupId, groupId, comment) }, {
+                        writing = false
+                        comment = ""
+                        Toasts.show(s.acc.repPending(groupId))
+                    })
+                }) { Text(s.acc.repSend, color = Blue, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+        else -> TextButton(onClick = { writing = true }) { Text("${s.acc.repRequest} · $groupId", color = Blue) }
+    }
+    ErrorLine(action.error)
+}
+
+@Composable
+private fun MyReviewsSheet(onClose: () -> Unit) {
+    val s = S
+    val bundle = LocalBundle.current
+    var items by remember { mutableStateOf<List<MyReview>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var opened by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        try {
+            items = Account.myReviews()
+        } catch (failure: ApiFailure) {
+            error = s.failureText(failure)
+        }
+    }
+    BottomSheet(onDismiss = onClose) {
+        Text(s.acc.myReviews, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        ErrorLine(error)
+        if (items?.isEmpty() == true) Text(s.acc.noMyReviews, color = Muted, fontSize = 13.sp)
+        items?.forEach { review ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Bg)
+                    .clickable(enabled = bundle != null) { opened = review.teacher }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (review.hidden) "${review.teacher} · ${s.acc.hiddenReview}" else review.teacher,
+                        color = Ink,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                    )
+                    Text(
+                        "★ ${review.overall} · ${s.acc.moment(review.updatedAt)} · 👍 ${review.likes} · 👎 ${review.dislikes}",
+                        color = Muted,
+                        fontSize = 12.sp,
+                    )
+                    if (review.text.isNotBlank()) Text(review.text, color = Ink, fontSize = 13.sp, maxLines = 2)
+                }
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Muted)
+            }
+        }
+    }
+    val name = opened
+    if (name != null && bundle != null) TeacherDialog(bundle, name, onClose = { opened = null })
+}
+
+@Composable
+private fun DevicesSheet(onClose: () -> Unit) {
+    val s = S
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<DeviceSession>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableIntStateOf(0) }
+    LaunchedEffect(attempt) {
+        try {
+            items = Account.sessions()
+        } catch (failure: ApiFailure) {
+            error = s.failureText(failure)
+        }
+    }
+    BottomSheet(onDismiss = onClose) {
+        Text(s.acc.devices, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        ErrorLine(error)
+        items?.forEach { item ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        item.device.ifBlank { s.acc.unknownDevice } + if (item.current) " · ${s.acc.thisDevice}" else "",
+                        color = Ink,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                    )
+                    Text(s.acc.deviceSeen(item.usedAt), color = Muted, fontSize = 12.sp)
+                }
+                if (!item.current) {
+                    TextButton(onClick = {
+                        scope.launch {
+                            try {
+                                Account.endSession(item.id)
+                                attempt++
+                            } catch (failure: ApiFailure) {
+                                Toasts.show(s.failureText(failure))
+                            }
+                        }
+                    }) { Text(s.more.signOut, color = Muted) }
+                }
+            }
+        }
     }
 }
 

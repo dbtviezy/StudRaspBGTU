@@ -1427,7 +1427,7 @@ fun ProfileScreen(
             PrimaryButton(s.changeGroup, onChangeGroup, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
         }
         Spacer(Modifier.height(12.dp))
-        AccountCard(onOpenChats = onOpenChats)
+        AccountCard(groupId = group.id, onOpenChats = onOpenChats)
         if (ru.bgtu.schedule.BuildConfig.ADMIN) {
             Spacer(Modifier.height(12.dp))
             SoftCard(onClick = onOpenAdmin) {

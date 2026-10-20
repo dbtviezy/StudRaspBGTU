@@ -51,8 +51,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.AlertDialog
 import kotlinx.coroutines.launch
+import ru.bgtu.schedule.data.Account
 import ru.bgtu.schedule.data.AdminApi
+import ru.bgtu.schedule.data.ReviewBlock
 import ru.bgtu.schedule.data.ApiFailure
 import ru.bgtu.schedule.data.FavoriteTeachers
 import ru.bgtu.schedule.data.RatingApi
@@ -236,10 +239,38 @@ private fun WhereCard(bundle: ScheduleBundle, teacher: String) {
     }
 }
 
-private fun ratingErrorOf(s: Copy, error: Throwable): String = when (val code = (error as? ApiFailure)?.code) {
-    null -> s.more.ratingFailed
-    "offline", "db_unavailable", "not_configured" -> s.ratingOffline
-    else -> if (code == "own_review" || code == "banned") s.errorText(code) else s.ratingError(code)
+private val ACCOUNT_CODES = setOf(
+    "own_review", "banned", "restricted", "unauthorized", "social_required", "account_too_new", "device_used",
+)
+
+private fun ratingErrorOf(s: Copy, error: Throwable): String {
+    val failure = error as? ApiFailure ?: return s.more.ratingFailed
+    return when (failure.code) {
+        "offline", "db_unavailable", "not_configured" -> s.ratingOffline
+        in ACCOUNT_CODES -> s.failureText(failure)
+        else -> s.ratingError(failure.code)
+    }
+}
+
+/** Explains that reviews, votes and reports need an account and offers to sign in. */
+@Composable
+internal fun NeedAccountDialog(onClose: () -> Unit) {
+    val s = S
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = Card,
+        titleContentColor = Ink,
+        textContentColor = Muted,
+        title = { Text(s.acc.needAccountTitle) },
+        text = { Text(s.acc.needAccountText) },
+        dismissButton = { TextButton(onClick = onClose) { Text(s.acc.later, color = Muted) } },
+        confirmButton = {
+            TextButton(onClick = {
+                onClose()
+                AppSignals.signIn = true
+            }) { Text(s.more.signIn, color = Blue, fontWeight = FontWeight.SemiBold) }
+        },
+    )
 }
 
 @Composable
@@ -250,7 +281,10 @@ private fun RatingCard(name: String, showName: Boolean) {
     var failed by remember(name) { mutableStateOf(false) }
     var attempt by remember(name) { mutableIntStateOf(0) }
     var rating by remember(name) { mutableStateOf(false) }
-    LaunchedEffect(name, attempt) {
+    var asking by remember { mutableStateOf(false) }
+    var blocked by remember(name) { mutableStateOf<String?>(null) }
+    val account by Account.state.collectAsState()
+    LaunchedEffect(name, attempt, account.user?.id) {
         val loaded = RatingApi.teacher(context, name)
         failed = loaded == null
         if (loaded != null) data = loaded
@@ -277,18 +311,36 @@ private fun RatingCard(name: String, showName: Boolean) {
         } else {
             PrimaryButton(
                 if (mine != null) s.editReview else s.rateTeacher,
-                onClick = { rating = true },
+                onClick = {
+                    blocked = null
+                    when (val block = account.reviewBlock()) {
+                        null -> rating = true
+                        ReviewBlock.NoAccount -> asking = true
+                        ReviewBlock.NeedSocial -> blocked = s.acc.socialRequired
+                        is ReviewBlock.TooNew -> blocked = s.acc.accountTooNew(block.until)
+                    }
+                },
                 enabled = data != null,
                 modifier = Modifier.padding(top = 12.dp),
             )
+            blocked?.let { Text(it, color = Red, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
         }
-        if (mine != null) ReviewCard(mine, title = s.more.yourReview, own = true, onChanged = { attempt++ })
+        if (mine != null) {
+            val note = when {
+                mine.hidden && mine.claimable -> s.acc.mineHiddenUnclaimed
+                mine.claimable -> s.acc.legacyMine(data?.legacyUntil)
+                else -> null
+            }
+            note?.let { Text(it, color = StarYellow, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
+            ReviewCard(mine, title = s.more.yourReview, own = true, onChanged = { attempt++ })
+        }
         if (data != null) {
             Text(s.ratingOpen, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.padding(top = 16.dp))
             if (others.isEmpty() && mine == null) Text(s.noReviews, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
             others.forEach { review -> ReviewCard(review, onChanged = { attempt++ }) }
         }
     }
+    if (asking) NeedAccountDialog { asking = false }
     if (rating) {
         RatingSheet(
             teacher = name,
@@ -349,9 +401,14 @@ private fun ReviewCard(review: TeacherReview, title: String? = null, own: Boolea
     var votes by remember(review.id, review.updatedAt) { mutableStateOf(VoteResult(review.likes, review.dislikes, review.myVote)) }
     var reporting by remember { mutableStateOf(false) }
     var banning by remember { mutableStateOf(false) }
+    var asking by remember { mutableStateOf(false) }
     val adminToken by AdminApi.token.collectAsState()
 
     fun vote(value: Int) {
+        if (!Account.current.signedIn) {
+            asking = true
+            return
+        }
         val next = if (votes.myVote == value) 0 else value
         val previous = votes
         votes = VoteResult(
@@ -364,7 +421,7 @@ private fun ReviewCard(review: TeacherReview, title: String? = null, own: Boolea
                 votes = RatingApi.vote(context, review.id, next)
             } catch (error: ApiFailure) {
                 votes = previous
-                Toasts.show(s.errorText(error.code))
+                Toasts.show(s.failureText(error))
             }
         }
     }
@@ -376,7 +433,7 @@ private fun ReviewCard(review: TeacherReview, title: String? = null, own: Boolea
                 Toasts.show(s.more.adminDone)
                 onChanged()
             } catch (error: ApiFailure) {
-                Toasts.show(s.errorText(error.code))
+                Toasts.show(s.failureText(error))
             }
         }
     }
@@ -418,7 +475,7 @@ private fun ReviewCard(review: TeacherReview, title: String? = null, own: Boolea
                     VoteButton(votes.myVote == 1, up = true, count = votes.likes, label = s.more.like) { vote(1) }
                     VoteButton(votes.myVote == -1, up = false, count = votes.dislikes, label = s.more.dislike) { vote(-1) }
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { reporting = true }, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = { if (Account.current.signedIn) reporting = true else asking = true }, modifier = Modifier.size(36.dp)) {
                         Icon(Icons.Outlined.Flag, contentDescription = s.more.report, tint = Muted, modifier = Modifier.size(18.dp))
                     }
                 }
@@ -432,6 +489,7 @@ private fun ReviewCard(review: TeacherReview, title: String? = null, own: Boolea
             }
         }
     }
+    if (asking) NeedAccountDialog { asking = false }
     if (reporting) {
         ReportSheet(
             onDismiss = { reporting = false },
@@ -441,9 +499,10 @@ private fun ReviewCard(review: TeacherReview, title: String? = null, own: Boolea
     if (banning) {
         BanSheet(
             withHideAll = true,
+            defaultScope = "reviews",
             onDismiss = { banning = false },
-            onBan = { days, reason, extra ->
-                AdminApi.action("ban.review", mapOf("id" to review.id, "days" to days, "reason" to reason, "hideAll" to extra))
+            onBan = { form ->
+                AdminApi.action("ban.review", form.fields() + mapOf("id" to review.id, "hideAll" to form.extra))
                 onChanged()
             },
         )
@@ -510,7 +569,7 @@ private fun RatingSheet(teacher: String, initial: TeacherReview?, onDismiss: () 
         busy = false
         when (result) {
             RatingResult.Ok -> onSaved()
-            is RatingResult.Failed -> error = s.ratingError(result.code)
+            is RatingResult.Failed -> error = if (result.code in ACCOUNT_CODES) s.failureText(result.failure) else s.ratingError(result.code)
         }
     }
 
@@ -598,7 +657,7 @@ fun ReportSheet(onDismiss: () -> Unit, onSend: suspend (String) -> Unit) {
                             Toasts.show(s.more.reportSent)
                             onDismiss()
                         } catch (failure: ApiFailure) {
-                            error = s.errorText(failure.code)
+                            error = s.failureText(failure)
                         } finally {
                             busy = false
                         }

@@ -71,6 +71,25 @@ object AppSignals {
 
     /** Chat to open after a tap on a message notification. */
     var openChat by mutableStateOf<String?>(null)
+
+    /** Opens the sign-in sheet from anywhere, e.g. when an action needs an account. */
+    var signIn by mutableStateOf(false)
+}
+
+/** A small «староста» pill next to a name. */
+@Composable
+internal fun RepBadge() {
+    Text(
+        S.more.roleRep,
+        color = Blue,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .padding(start = 6.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .background(BlueSoft)
+            .padding(horizontal = 7.dp, vertical = 1.dp),
+    )
 }
 
 /** Masks swear words in other people's text when the user turned the filter on. */
@@ -117,7 +136,7 @@ private suspend fun guardedCall(s: Copy, body: suspend () -> Unit) {
     try {
         body()
     } catch (failure: ApiFailure) {
-        Toasts.show(s.errorText(failure.code))
+        Toasts.show(s.failureText(failure))
     }
 }
 
@@ -132,9 +151,9 @@ internal fun MembersSheet(chat: ChatInfo, onClose: () -> Unit) {
 
     LaunchedEffect(attempt) {
         try {
-            members = ChatStore.members(chat.id)
+            members = ChatStore.members(chat.id, chat.groupId)
         } catch (failure: ApiFailure) {
-            error = s.errorText(failure.code)
+            error = s.failureText(failure)
         }
     }
 
@@ -152,12 +171,15 @@ internal fun MembersSheet(chat: ChatInfo, onClose: () -> Unit) {
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        if (member.userId == me) "${member.name} (${s.more.you})" else member.name,
-                        color = Ink,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (member.userId == me) "${member.name} (${s.more.you})" else member.name,
+                            color = Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (member.rep) RepBadge()
+                    }
                     if (member.role != "member") {
                         Text(if (member.role == "owner") s.more.roleOwner else s.more.roleHelper, color = Blue, fontSize = 12.sp)
                     }
@@ -306,7 +328,7 @@ private fun NewPollForm(chat: ChatInfo, onDone: () -> Unit) {
                         ChatStore.createPoll(chat.id, question.trim(), filled, multiple)
                         onDone()
                     } catch (failure: ApiFailure) {
-                        error = s.errorText(failure.code)
+                        error = s.failureText(failure)
                     } finally {
                         busy = false
                     }
@@ -329,7 +351,7 @@ internal fun PollsSheet(chat: ChatInfo, onClose: () -> Unit) {
             ChatStore.refreshPolls(chat.id)
             null
         } catch (failure: ApiFailure) {
-            s.errorText(failure.code)
+            s.failureText(failure)
         }
     }
 
@@ -452,7 +474,7 @@ private fun NewTaskForm(chat: ChatInfo, onDone: () -> Unit) {
                         ChatStore.addGroupTask(chat.id, title.trim(), note.trim(), date, cleanTime)
                         onDone()
                     } catch (failure: ApiFailure) {
-                        error = s.errorText(failure.code)
+                        error = s.failureText(failure)
                     } finally {
                         busy = false
                     }
@@ -490,7 +512,7 @@ internal fun GroupTasksSheet(chat: ChatInfo, onClose: () -> Unit) {
             ChatStore.refreshGroupTasks()
             null
         } catch (failure: ApiFailure) {
-            s.errorText(failure.code)
+            s.failureText(failure)
         }
     }
 

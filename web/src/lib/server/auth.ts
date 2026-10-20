@@ -70,7 +70,12 @@ export function cleanName(value: unknown): string {
 /** "Android · Pixel 7" from the app's X-Device-Name header, otherwise a guess from the browser's user agent. */
 export function deviceLabel(request: Request | null): string {
   if (!request) return "";
-  const named = (request.headers.get("x-device-name") ?? "").replace(/[\u0000-\u001f]/g, "").trim();
+  const raw = request.headers.get("x-device-name") ?? "";
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw.replace(/\+/g, " "));
+  } catch {}
+  const named = decoded.replace(/[\u0000-\u001f]/g, "").trim();
   if (named) return named.slice(0, 80);
   const agent = request.headers.get("user-agent") ?? "";
   const system = /iPhone|iPad/.test(agent) ? "iPhone" : /Android/.test(agent) ? "Android"

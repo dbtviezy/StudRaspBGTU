@@ -31,7 +31,10 @@ class MoreCopy(private val en: Boolean) {
     val announcement = t("Объявление", "Announcement")
 
     val account = t("Аккаунт", "Account")
-    val accountHint = t("Нужен только для чатов. Расписание, заметки и дела работают без входа.", "Only needed for chats. Schedule, notes and tasks work without signing in.")
+    val accountHint = t(
+        "Нужен для отзывов, чатов и синхронизации заметок, дел и настроек между телефоном и сайтом. Расписание работает без входа.",
+        "Needed for reviews, chats and syncing notes, tasks and settings between your phone and the website. The schedule works without signing in.",
+    )
     val signIn = t("Войти", "Sign in")
     val signUp = t("Создать аккаунт", "Create account")
     val signOut = t("Выйти", "Sign out")
@@ -59,8 +62,8 @@ class MoreCopy(private val en: Boolean) {
     val providerOff = t("Этот способ входа ещё не настроен на сервере", "This sign-in method is not set up on the server yet")
     val deleteAccount = t("Удалить аккаунт", "Delete account")
     val deleteAccountText = t(
-        "Аккаунт и вход на всех устройствах будут удалены. Сообщения в чатах исчезнут сами по сроку хранения.",
-        "The account and its sign-ins on all devices will be deleted. Chat messages expire on their own.",
+        "Будут удалены аккаунт, вход на всех устройствах, синхронизированные данные и ваши сообщения в чатах. Данные на этом устройстве останутся.",
+        "The account, its sign-ins on all devices, synced data and your chat messages will be deleted. Data on this device stays.",
     )
     val signedInToast = t("Вы вошли в аккаунт", "You are signed in")
     val wrongCredentials = t("Неверный логин или пароль", "Wrong login or password")
@@ -232,7 +235,8 @@ class MoreCopy(private val en: Boolean) {
         listOf(
             "Chats" to "Group chat by invite code and direct messages. Messages written offline are sent later. Phones nearby can chat even without the internet.",
             "Pins, polls and group tasks" to "The class rep and helpers can pin a message, run a poll and post deadlines for the whole group.",
-            "Account" to "Sign in with a login and password, Telegram or Google — needed only for chats.",
+            "Account" to "Reviews, review votes and reports now need an account. Notes, tasks, misses, favorites and settings are the same on your phone and the website.",
+            "Class rep" to "A class rep confirmed by a moderator gets a badge and helper rights in every chat of their group. Send a request in your profile.",
             "Reviews" to "Like or dislike other people's reviews and report rule-breakers.",
             "Where is the teacher" to "The teacher page shows their current class and room, or the next one.",
             "Notifications" to "Message notifications and the current class with a countdown in the notification shade.",
@@ -243,7 +247,8 @@ class MoreCopy(private val en: Boolean) {
         listOf(
             "Чаты" to "Чат группы по коду приглашения и личные сообщения. Написанное без сети отправится позже. Рядом стоящие телефоны могут переписываться даже без интернета.",
             "Закреп, опросы и дела группы" to "Староста и помощники могут закрепить сообщение, провести опрос и выложить дедлайны для всей группы.",
-            "Аккаунт" to "Вход по логину и паролю, через Telegram или Google — нужен только для чатов.",
+            "Аккаунт" to "Отзывы, оценки отзывов и жалобы теперь с аккаунтом. Заметки, дела, пропуски, избранное и настройки одинаковые на телефоне и на сайте.",
+            "Староста" to "Подтверждённый модератором староста получает значок и права помощника во всех чатах своей группы. Заявка — в профиле.",
             "Отзывы" to "Лайки и дизлайки к чужим отзывам и жалобы на нарушителей.",
             "Где преподаватель" to "На странице преподавателя видно, на какой он паре и в какой аудитории, или когда следующая.",
             "Уведомления" to "Уведомления о сообщениях и текущая пара с обратным отсчётом в шторке.",
@@ -269,13 +274,14 @@ class MoreCopy(private val en: Boolean) {
     val pin = t("Закрепить", "Pin")
     val unpin = t("Открепить", "Unpin")
     val members = t("Участники", "Members")
-    val roleOwner = t("староста", "class rep")
+    val roleOwner = t("создатель", "creator")
+    val roleRep = t("староста", "class rep")
     val roleHelper = t("помощник", "helper")
     val makeHelper = t("Сделать помощником", "Make helper")
     val removeHelper = t("Убрать из помощников", "Remove helper")
     val helpersHint = t(
-        "Староста и помощники могут закреплять сообщения, создавать опросы и дела группы.",
-        "The class rep and helpers can pin messages and create polls and group tasks.",
+        "Создатель чата, помощники и подтверждённый староста группы могут закреплять сообщения, создавать опросы и дела группы.",
+        "The chat creator, helpers and the confirmed class rep can pin messages and create polls and group tasks.",
     )
     val polls = t("Опросы", "Polls")
     val newPoll = t("Новый опрос", "New poll")
@@ -326,7 +332,7 @@ class MoreCopy(private val en: Boolean) {
         "review.delete" -> t("Удалён отзыв", "Review deleted")
         "ban.review" -> t("Бан по отзыву", "Ban for a review")
         "ban.message" -> t("Бан по сообщению", "Ban for a message")
-        "ban.user" -> t("Бан аккаунта", "Account banned")
+        "ban.user" -> t("Ограничение аккаунта", "Account restricted")
         "ban.remove" -> t("Снят бан", "Ban lifted")
         "message.delete" -> t("Удалено сообщение", "Message deleted")
         "report.dismiss" -> t("Отклонена жалоба", "Report dismissed")
@@ -334,6 +340,9 @@ class MoreCopy(private val en: Boolean) {
         "announce.create" -> t("Опубликовано объявление", "Announcement published")
         "announce.remove" -> t("Снято объявление", "Announcement removed")
         "user.delete" -> t("Удалён аккаунт", "Account deleted")
+        "rep.approve" -> t("Подтверждён староста", "Class rep approved")
+        "rep.reject" -> t("Отклонена заявка на старосту", "Class rep request declined")
+        "rep.revoke" -> t("Снят староста", "Class rep revoked")
         else -> action
     }
 }

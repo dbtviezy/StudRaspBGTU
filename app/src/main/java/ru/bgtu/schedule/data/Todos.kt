@@ -58,6 +58,10 @@ class TodoStore(context: Context) {
         write(all().filterNot { it.id == id })
     }
 
+    fun replaceAll(items: List<TodoItem>) {
+        write(items.filter { it.title.isNotBlank() })
+    }
+
     private fun write(items: List<TodoItem>) {
         val array = JSONArray()
         items.forEach { item ->

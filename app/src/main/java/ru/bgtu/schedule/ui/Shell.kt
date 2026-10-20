@@ -83,6 +83,7 @@ import ru.bgtu.schedule.data.Group
 import ru.bgtu.schedule.data.Lesson
 import ru.bgtu.schedule.data.Prefs
 import ru.bgtu.schedule.data.ScheduleRepository
+import ru.bgtu.schedule.data.Sync
 import ru.bgtu.schedule.notify.LessonAlerts
 import java.time.LocalDate
 import kotlin.math.hypot
@@ -168,6 +169,28 @@ fun BgtuApp() {
         if (wait > 0) delay(wait)
         if (loaded == null) failed = true else bundle = loaded
         splash = false
+    }
+
+    LaunchedEffect(Unit) {
+        var seen = Sync.applied.value
+        Sync.applied.collect { tick ->
+            if (tick == seen) return@collect
+            seen = tick
+            shellUi.followSystem = prefs.followSystemTheme()
+            if (reveal == null) dark = prefs.darkTheme()
+            lang = prefs.language()
+            studentName = prefs.name()
+            prefs.groupId()?.let { groupId = it }
+            AppSignals.hideProfanity = prefs.hideProfanity()
+            shellUi.notesVersion++
+            shellUi.tasksVersion++
+            ru.bgtu.schedule.widget.ScheduleWidget.refresh(context.applicationContext)
+            withContext(Dispatchers.IO) {
+                ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(context.applicationContext)
+                if (prefs.notifyEnabled()) LessonAlerts.reschedule(context.applicationContext) else LessonAlerts.cancelAll(context.applicationContext)
+                ru.bgtu.schedule.notify.OngoingLesson.reschedule(context.applicationContext)
+            }
+        }
     }
 
     LaunchedEffect(groupId, splash) {
@@ -490,6 +513,8 @@ private fun MainShell(
     val copy = S
 
     var updateTag by remember { mutableStateOf<String?>(null) }
+    var offerLogin by remember { mutableStateOf(!prefs.loginOffered()) }
+    val syncStatus by Sync.status.collectAsState()
     if (windows) {
         LaunchedEffect(Unit) { Account.refresh() }
         LaunchedEffect(AppSignals.openChat) {
@@ -511,9 +536,14 @@ private fun MainShell(
                     Toasts.show(copy.more.signedInToast)
                     shellUi.tab = 5
                 } catch (failure: ApiFailure) {
-                    Toasts.show(copy.errorText(failure.code))
+                    Toasts.show(copy.failureText(failure))
                 }
             }
+        }
+        LaunchedEffect(account.user?.id) {
+            if (account.user == null) return@LaunchedEffect
+            Sync.claimOnce(context)
+            Sync.syncSoon(context)
         }
         LaunchedEffect(account.signedIn) {
             if (!account.signedIn) return@LaunchedEffect
@@ -684,6 +714,21 @@ private fun MainShell(
                 })
             }
             updateTag?.let { tag -> UpdateDialog(tag) { updateTag = null } }
+            if (offerLogin && !account.signedIn && !shellUi.whatsNew && prefs.seenVersion() == AppVersion.LABEL) {
+                LoginOfferDialog(
+                    onSignIn = {
+                        prefs.setLoginOffered()
+                        offerLogin = false
+                        AppSignals.signIn = true
+                    },
+                    onClose = {
+                        prefs.setLoginOffered()
+                        offerLogin = false
+                    },
+                )
+            }
+            if (AppSignals.signIn) SignInSheet(onClose = { AppSignals.signIn = false })
+            if (syncStatus.asking) SyncQuestionDialog()
             ToastHost()
         }
     }

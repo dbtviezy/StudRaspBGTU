@@ -25,15 +25,27 @@ data class TeacherReview(
     val likes: Int = 0,
     val dislikes: Int = 0,
     val myVote: Int = 0,
+    /** My review left from this device without an account. */
+    val claimable: Boolean = false,
+    val hidden: Boolean = false,
 )
 
-data class TeacherRatings(val summary: RatingSummary?, val reviews: List<TeacherReview>, val mine: TeacherReview?)
+data class TeacherRatings(
+    val summary: RatingSummary?,
+    val reviews: List<TeacherReview>,
+    val mine: TeacherReview?,
+    val legacyUntil: String? = null,
+)
 
 data class VoteResult(val likes: Int, val dislikes: Int, val myVote: Int)
 
+data class Claimable(val count: Int, val until: String?)
+
 sealed class RatingResult {
     data object Ok : RatingResult()
-    data class Failed(val code: String) : RatingResult()
+    data class Failed(val failure: ApiFailure) : RatingResult() {
+        val code: String get() = failure.code
+    }
 }
 
 object RatingApi {
@@ -63,12 +75,13 @@ object RatingApi {
 
     suspend fun teacher(context: Context, name: String): TeacherRatings? {
         val query = URLEncoder.encode(name.trim(), "UTF-8")
-        val reply = Http.call("GET", "/api/ratings/teacher?name=$query", headers = mapOf("X-Device-Id" to deviceId(context)))
+        val headers = Account.authHeaders() + ("X-Device-Id" to deviceId(context))
+        val reply = Http.call("GET", "/api/ratings/teacher?name=$query", headers = headers)
         val root = reply?.takeIf { it.ok }?.json() ?: return null
         val list = root.optJSONArray("reviews").mapObjects { reviewOf(it) }
         val summary = root.optJSONObject("summary")?.let { summaryOf(it) }
         summary?.let { summaries = cachedSummaries() + (it.teacher to it) }
-        return TeacherRatings(summary, list, root.optJSONObject("mine")?.let { reviewOf(it) })
+        return TeacherRatings(summary, list, root.optJSONObject("mine")?.let { reviewOf(it) }, root.stringOrNull("legacyUntil"))
     }
 
     suspend fun submit(
@@ -99,26 +112,41 @@ object RatingApi {
     /** [value] is 1 (like), -1 (dislike) or 0 (take the vote back). */
     suspend fun vote(context: Context, reviewId: Long, value: Int): VoteResult {
         val body = JSONObject().put("deviceId", deviceId(context)).put("reviewId", reviewId).put("value", value)
-        val root = Http.api("POST", "/api/ratings/vote", body)
+        val root = Http.api("POST", "/api/ratings/vote", body, Account.authHeaders())
         return VoteResult(root.optInt("likes"), root.optInt("dislikes"), root.optInt("myVote"))
     }
 
-    suspend fun report(context: Context, kind: String, target: Long, reason: String, token: String? = null) {
+    suspend fun report(context: Context, kind: String, target: Long, reason: String) {
         val body = JSONObject()
             .put("deviceId", deviceId(context))
             .put("kind", kind)
             .put("target", target)
             .put("reason", reason.trim().take(200))
-        Http.api("POST", "/api/reports", body, token?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty())
+        Http.api("POST", "/api/reports", body, Account.authHeaders())
+    }
+
+    /** Old reviews left from this device without an account. */
+    suspend fun claimable(context: Context): Claimable? {
+        val reply = Http.call("GET", "/api/ratings/claim", headers = mapOf("X-Device-Id" to deviceId(context)))
+        val root = reply?.takeIf { it.ok }?.json() ?: return null
+        return Claimable(root.optInt("count"), root.stringOrNull("until"))
+    }
+
+    /** Moves this device's old reviews, votes and reports to the signed-in account. */
+    suspend fun claim(context: Context): Int {
+        val root = Http.api("POST", "/api/ratings/claim", JSONObject().put("deviceId", deviceId(context)), Account.authHeaders())
+        summaries = null
+        return root.optInt("claimed")
     }
 
     private suspend fun send(method: String, body: JSONObject): RatingResult {
-        val response = Http.call(method, "/api/ratings", body.toString()) ?: return RatingResult.Failed("offline")
+        val response = Http.call(method, "/api/ratings", body.toString(), Account.authHeaders())
+            ?: return RatingResult.Failed(ApiFailure("offline"))
         return if (response.ok) {
             summaries = null
             RatingResult.Ok
         } else {
-            RatingResult.Failed(response.errorCode())
+            RatingResult.Failed(response.failure())
         }
     }
 
@@ -146,5 +174,7 @@ object RatingApi {
         likes = item.optInt("likes"),
         dislikes = item.optInt("dislikes"),
         myVote = item.optInt("myVote"),
+        claimable = item.optBoolean("claimable"),
+        hidden = item.optBoolean("hidden"),
     )
 }
