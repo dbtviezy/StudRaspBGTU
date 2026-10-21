@@ -29,6 +29,7 @@ object DeadlineAlerts {
         val app = context.applicationContext
         val manager = app.getSystemService(AlarmManager::class.java) ?: return
         cancel(app, manager)
+        if (!ru.bgtu.schedule.data.NotifyProfile.allowsDeadlines(Prefs(app).notifyProfile())) return
         val now = LocalDateTime.now()
         val upcoming = TodoStore(app).all().mapNotNull { item ->
             val at = fireAt(item) ?: return@mapNotNull null

@@ -59,6 +59,9 @@
             android:name=".notify.DeadlineAlarmReceiver"
             android:exported="false" />
         <receiver
+            android:name=".notify.DigestAlarmReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".notify.OngoingLessonReceiver"
             android:exported="false" />
         <service

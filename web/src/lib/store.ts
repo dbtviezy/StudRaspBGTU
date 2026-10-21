@@ -40,6 +40,11 @@ export interface Data {
   systemTheme: boolean;
   hideProfanity: boolean;
   chatPush: boolean;
+  /** normal | quiet | session | off — see lib/notify.ts */
+  notifyProfile: "normal" | "quiet" | "session" | "off";
+  digestOn: boolean;
+  /** Local hour 18..23 for the evening digest. */
+  digestHour: number;
   /** Last app version whose "What's new" screen was shown. */
   seenVersion: string | null;
   /** The one-time "sign in" suggestion was shown. */
@@ -65,6 +70,9 @@ const DEFAULTS: Data = {
   systemTheme: false,
   hideProfanity: false,
   chatPush: false,
+  notifyProfile: "normal",
+  digestOn: false,
+  digestHour: 21,
   seenVersion: null,
   loginOffered: false,
 };

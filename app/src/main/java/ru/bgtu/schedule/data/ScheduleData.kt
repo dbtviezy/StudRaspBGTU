@@ -165,16 +165,61 @@ class Prefs(context: Context) {
         sp.edit().putBoolean(KEY_PROFANITY, value).apply()
     }
 
-    fun chatNotify(): Boolean = sp.getBoolean(KEY_CHAT_NOTIFY, false)
+    fun chatNotify(): Boolean =
+        NotifyProfile.allowsChats(notifyProfile()) && sp.getBoolean(KEY_CHAT_NOTIFY, false)
 
     fun setChatNotify(value: Boolean) {
-        sp.edit().putBoolean(KEY_CHAT_NOTIFY, value).apply()
+        sp.edit().putBoolean(KEY_CHAT_NOTIFY, value && NotifyProfile.allowsChats(notifyProfile())).apply()
     }
 
-    fun ongoingLesson(): Boolean = sp.getBoolean(KEY_ONGOING, false)
+    fun ongoingLesson(): Boolean =
+        NotifyProfile.allowsOngoing(notifyProfile()) && sp.getBoolean(KEY_ONGOING, false)
 
     fun setOngoingLesson(value: Boolean) {
-        sp.edit().putBoolean(KEY_ONGOING, value).apply()
+        sp.edit().putBoolean(KEY_ONGOING, value && NotifyProfile.allowsOngoing(notifyProfile())).apply()
+    }
+
+    /** normal | quiet | session | off. Migrates once from the old lesson/chat toggles. */
+    fun notifyProfile(): String {
+        migrateNotifyProfile()
+        return NotifyProfile.clean(sp.getString(KEY_NOTIFY_PROFILE, NotifyProfile.NORMAL))
+    }
+
+    fun setNotifyProfile(value: String) {
+        val profile = NotifyProfile.clean(value)
+        val edit = sp.edit().putString(KEY_NOTIFY_PROFILE, profile)
+        if (!NotifyProfile.allowsLessons(profile)) edit.putBoolean(KEY_NOTIFY, false)
+        else if (!sp.getBoolean(KEY_NOTIFY, false)) edit.putBoolean(KEY_NOTIFY, true)
+        if (!NotifyProfile.allowsChats(profile)) edit.putBoolean(KEY_CHAT_NOTIFY, false)
+        if (!NotifyProfile.allowsOngoing(profile)) edit.putBoolean(KEY_ONGOING, false)
+        if (!NotifyProfile.allowsDigest(profile)) edit.putBoolean(KEY_DIGEST, false)
+        edit.apply()
+    }
+
+    fun digestEnabled(): Boolean =
+        NotifyProfile.allowsDigest(notifyProfile()) && sp.getBoolean(KEY_DIGEST, false)
+
+    fun setDigestEnabled(value: Boolean) {
+        sp.edit().putBoolean(KEY_DIGEST, value && NotifyProfile.allowsDigest(notifyProfile())).apply()
+    }
+
+    /** Local hour 18..23 for the evening digest; default 21. */
+    fun digestHour(): Int = sp.getInt(KEY_DIGEST_HOUR, 21).coerceIn(18, 23)
+
+    fun setDigestHour(hour: Int) {
+        sp.edit().putInt(KEY_DIGEST_HOUR, hour.coerceIn(18, 23)).apply()
+    }
+
+    private fun migrateNotifyProfile() {
+        if (sp.contains(KEY_NOTIFY_PROFILE)) return
+        val lessons = sp.getBoolean(KEY_NOTIFY, false)
+        val chats = sp.getBoolean(KEY_CHAT_NOTIFY, false)
+        val profile = when {
+            !lessons && !chats -> NotifyProfile.OFF
+            !lessons && chats -> NotifyProfile.QUIET
+            else -> NotifyProfile.NORMAL
+        }
+        sp.edit().putString(KEY_NOTIFY_PROFILE, profile).apply()
     }
 
     fun seenVersion(): String? = sp.getString(KEY_SEEN_VERSION, null)
@@ -229,10 +274,16 @@ class Prefs(context: Context) {
         edit.apply()
     }
 
-    fun notifyEnabled(): Boolean = sp.getBoolean(KEY_NOTIFY, false)
+    /** Lesson reminders are on only in the normal profile (and the stored toggle). */
+    fun notifyEnabled(): Boolean =
+        NotifyProfile.allowsLessons(notifyProfile()) && sp.getBoolean(KEY_NOTIFY, false)
 
     fun setNotifyEnabled(value: Boolean) {
-        sp.edit().putBoolean(KEY_NOTIFY, value).apply()
+        val edit = sp.edit().putBoolean(KEY_NOTIFY, value)
+        if (value && notifyProfile() != NotifyProfile.NORMAL) {
+            edit.putString(KEY_NOTIFY_PROFILE, NotifyProfile.NORMAL)
+        }
+        edit.apply()
     }
 
     fun notifyLead(): Int = sp.getInt(KEY_LEAD, 10)
@@ -275,6 +326,9 @@ class Prefs(context: Context) {
         private const val KEY_DARK = "dark"
         private const val KEY_NOTIFY = "notify"
         private const val KEY_LEAD = "notify_lead"
+        private const val KEY_NOTIFY_PROFILE = "notify_profile"
+        private const val KEY_DIGEST = "digest"
+        private const val KEY_DIGEST_HOUR = "digest_hour"
         private const val KEY_WIDGET_DATE = "widget_date"
         private const val KEY_WIDGET_PICKED_ON = "widget_picked_on"
         private const val KEY_LANG = "lang"

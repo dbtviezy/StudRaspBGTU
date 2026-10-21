@@ -195,6 +195,66 @@ class MoreCopy(private val en: Boolean) {
     val themeSystemHint = t("Светлая или тёмная — как на телефоне", "Light or dark, same as your device")
     val hideProfanity = t("Скрывать мат", "Hide swear words")
     val hideProfanityHint = t("В чатах и отзывах плохие слова заменятся звёздочками", "Swear words in chats and reviews are replaced with asterisks")
+    val notifyProfilesTitle = t("Уведомления", "Notifications")
+    val notifyProfilesHint = t(
+        "Один режим на всё: пары, дайджест, дедлайны и чаты. Потом можно будет добавить новые режимы.",
+        "One mode for everything: classes, digest, deadlines and chats. New modes can be added later.",
+    )
+    fun notifyProfileLabel(id: String): String = when (id) {
+        "normal" -> t("Обычный", "Normal")
+        "quiet" -> t("Тихий", "Quiet")
+        "session" -> t("Сессия", "Exam period")
+        "off" -> t("Выкл", "Off")
+        else -> id
+    }
+    fun notifyProfileHint(id: String): String = when (id) {
+        "normal" -> t("Пары, дайджест, дедлайны, чаты и объявления", "Classes, digest, deadlines, chats and announcements")
+        "quiet" -> t("Только дедлайны, чаты и объявления — без напоминаний о парах", "Only deadlines, chats and announcements — no class reminders")
+        "session" -> t("Только дедлайны", "Deadlines only")
+        "off" -> t("Все уведомления приложения выключены", "All app notifications are off")
+        else -> ""
+    }
+    val digestTitle = t("Завтрашнее расписание", "Tomorrow's schedule")
+    val digestSwitch = t("Вечерний дайджест", "Evening digest")
+    val digestSwitchHint = t(
+        "Вечером одно сообщение: сколько пар завтра и где первая",
+        "One evening message: how many classes tomorrow and where the first is",
+    )
+    val digestHour = t("Время дайджеста", "Digest time")
+    fun digestBody(count: Int, time: String, room: String): String {
+        val rooms = room.trim()
+        val where = if (rooms.isBlank()) time else "$time, $rooms"
+        return if (en) {
+            val word = if (count == 1) "class" else "classes"
+            "Tomorrow: $count $word. First at $where."
+        } else {
+            val word = when {
+                count % 100 in 11..14 -> "пар"
+                count % 10 == 1 -> "пара"
+                count % 10 in 2..4 -> "пары"
+                else -> "пар"
+            }
+            "Завтра $count $word. Первая в $where."
+        }
+    }
+    val channelDigest = t("Дайджест", "Digest")
+    val channelDigestHint = t("Кратко про пары на завтра", "A short note about tomorrow's classes")
+    val otherBuildingHint = t("другой корпус, выйти заранее", "different building — leave early")
+    val guestTitle = t("Вы без аккаунта", "You're a guest")
+    val guestHint = t(
+        "Без входа работают расписание, заметки, дела, пропуски и файлы. Вход нужен для чатов, отзывов и синхронизации между телефоном и сайтом.",
+        "Without signing in you still get the schedule, notes, tasks, misses and files. Sign in for chats, reviews and syncing between your phone and the website.",
+    )
+    val guestSignIn = t("Войти", "Sign in")
+    val exportData = t("Скачать мои данные", "Download my data")
+    val exportDataHint = t(
+        "Заметки, дела, пропуски, скрытые пары, избранное и настройки — один JSON-файл. Без рекламы в расписании: так и держим главный экран чистым; если появятся платные опции, они не попадут в ленту пар.",
+        "Notes, tasks, misses, hidden classes, favorites and settings in one JSON file. No ads in the schedule: we keep the main screen clean; if paid options appear later, they will not mix into the class list.",
+    )
+    val noAdsNote = t(
+        "Сейчас в ленте расписания нет рекламы и чужих вакансий. Если когда‑нибудь появятся платные опции — не вперемешку с парами.",
+        "Right now the schedule feed has no ads or third-party jobs. If paid options appear later, they will not mix into your classes.",
+    )
     val chatNotify = t("Уведомления о сообщениях", "Message notifications")
     val chatNotifyHint = t("Новые сообщения проверяются примерно раз в 15 минут", "New messages are checked about every 15 minutes")
     val chatNotifySignIn = t("Сначала войдите в аккаунт", "Sign in first")

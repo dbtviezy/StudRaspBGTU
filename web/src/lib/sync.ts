@@ -21,7 +21,7 @@ interface Item {
 }
 
 /** Settings this platform has; others (Android reminders) are kept on the server untouched. */
-const OWN_SETTINGS = new Set(["dark", "systemTheme", "lang", "hideProfanity"]);
+const OWN_SETTINGS = new Set(["dark", "systemTheme", "lang", "hideProfanity", "notifyProfile", "digest", "digestHour"]);
 const DATA_SECTIONS: Section[] = ["fav", "notes", "subjectNotes", "todos", "absences", "limits", "hidden", "dayChanges"];
 const SEP = "\u0001";
 const STATE_KEY = `${PREFIX}sync`;
@@ -132,6 +132,9 @@ function collect(d: Data): Map<string, string> {
   put("settings", "systemTheme", d.systemTheme);
   if (d.lang) put("settings", "lang", d.lang);
   put("settings", "hideProfanity", d.hideProfanity);
+  put("settings", "notifyProfile", d.notifyProfile);
+  put("settings", "digest", d.digestOn);
+  put("settings", "digestHour", d.digestHour);
   return out;
 }
 
@@ -236,6 +239,11 @@ function apply(items: Item[], replace = false) {
             else if (k === "systemTheme") patch.systemTheme = Boolean(v);
             else if (k === "lang" && (v === "ru" || v === "en")) patch.lang = v;
             else if (k === "hideProfanity") patch.hideProfanity = Boolean(v);
+            else if (k === "notifyProfile" && (v === "normal" || v === "quiet" || v === "session" || v === "off")) {
+              patch.notifyProfile = v;
+              if (v !== "normal" && v !== "quiet") patch.chatPush = false;
+            } else if (k === "digest") patch.digestOn = Boolean(v);
+            else if (k === "digestHour" && typeof v === "number") patch.digestHour = Math.min(23, Math.max(18, Math.round(v)));
             break;
         }
       }

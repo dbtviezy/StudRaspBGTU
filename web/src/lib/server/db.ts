@@ -116,6 +116,11 @@ export function ensureSchema(): Promise<void> {
       lang varchar(2) NOT NULL DEFAULT 'ru',
       created_at timestamptz NOT NULL DEFAULT now()
     )`;
+    await q`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS notify_profile varchar(16) NOT NULL DEFAULT 'normal'`;
+    await q`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS digest_on boolean NOT NULL DEFAULT false`;
+    await q`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS digest_hour int NOT NULL DEFAULT 21`;
+    await q`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS group_id varchar(40) NOT NULL DEFAULT ''`;
+    await q`ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS time_zone varchar(64) NOT NULL DEFAULT 'Europe/Moscow'`;
     await q`CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id)`;
     // v1.2: reviews, votes and reports belong to accounts; `kept` marks reviews left anonymous on account deletion,
     // `unclaimed` marks old device-only reviews hidden after LEGACY_REVIEWS_UNTIL.

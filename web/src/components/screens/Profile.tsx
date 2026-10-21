@@ -6,6 +6,7 @@ import { download, exportBackup, importBackup } from "@/lib/backup";
 import { APP_VERSION } from "@/lib/i18n";
 import { subscriptionUrl } from "@/lib/ics";
 import { clearFiles, setAvatar, useAvatar, useLibrary } from "@/lib/idb";
+import { allowsChats, allowsDigest, type NotifyProfileId, NOTIFY_PROFILES } from "@/lib/notify";
 import { disablePush, enablePush, syncPush } from "@/lib/push";
 import { weekInfo } from "@/lib/schedule";
 import { actions, setState, sortedTodos } from "@/lib/store";
@@ -40,7 +41,7 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
 }
 
 export default function ProfileScreen() {
-  const { bundle, s, data, today, faculty, group, openTasks, openFiles, setLanguage, pickGroup, pickFriend, onReset, toast } = useShell();
+  const { bundle, s, data, today, faculty, group, openTasks, openFiles, setLanguage, pickGroup, pickFriend, onReset, toast, signIn } = useShell();
   const avatar = useAvatar();
   const library = useLibrary();
   const photoInput = useRef<HTMLInputElement>(null);
@@ -81,8 +82,24 @@ export default function ProfileScreen() {
   const subjectNotes = Object.entries(data.subjectNotes).filter(([, v]) => v.trim()).sort(([a], [b]) => a.localeCompare(b));
   const librarySize = library.reduce((sum, f) => sum + f.size, 0);
 
+  const profileLabel = (id: NotifyProfileId) =>
+    id === "quiet" ? s.notifyProfileQuiet : id === "session" ? s.notifyProfileSession : id === "off" ? s.notifyProfileOff : s.notifyProfileNormal;
+  const profileHint = (id: NotifyProfileId) =>
+    id === "quiet" ? s.notifyHintQuiet : id === "session" ? s.notifyHintSession : id === "off" ? s.notifyHintOff : s.notifyHintNormal;
+
+  const setNotifyProfile = async (id: NotifyProfileId) => {
+    const next = {
+      notifyProfile: id,
+      digestOn: allowsDigest(id) ? data.digestOn : false,
+      chatPush: allowsChats(id) ? data.chatPush : false,
+    };
+    setState(next);
+    if (!allowsChats(id) && data.chatPush) await disablePush();
+    else if (data.chatPush) await syncPush().catch(() => undefined);
+  };
+
   const saveBackup = () => {
-    download(`studrasp-backup-${today}.json`, exportBackup(library.map((f) => f.name)), "application/json");
+    download(`studrasp-data-${today}.json`, exportBackup(library.map((f) => f.name)), "application/json");
     toast(s.backupDone);
   };
 
@@ -179,6 +196,12 @@ export default function ProfileScreen() {
 
       <AccountCard />
 
+      {!user && (
+        <Card title={s.guestTitle} hint={s.guestHint}>
+          <button className="btn mt12" onClick={signIn}>{s.signIn}</button>
+        </Card>
+      )}
+
       <Card title={s.secondGroup} hint={s.secondGroupHint}>
         {friend && <div className="semibold mt8">{`${friend.group.id} · ${friend.faculty.short}`}</div>}
         <div className="row mt4" style={{ marginLeft: -8 }}>
@@ -213,6 +236,59 @@ export default function ProfileScreen() {
         </div>
       </button>
 
+      <Card title={s.notifyProfilesTitle} hint={s.notifyProfilesHint}>
+        <div className="muted small mt8">{profileHint(data.notifyProfile)}</div>
+        <div className="row mt8" style={{ flexWrap: "wrap", gap: 8 }}>
+          {NOTIFY_PROFILES.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={data.notifyProfile === id ? "chip on" : "chip"}
+              onClick={() => setNotifyProfile(id)}
+            >
+              {profileLabel(id)}
+            </button>
+          ))}
+        </div>
+        {allowsDigest(data.notifyProfile) && (
+          <>
+            <SettingRow
+              title={s.digestSwitch}
+              hint={s.digestSwitchHint}
+              on={data.digestOn}
+              onToggle={async () => {
+                if (!data.digestOn && !data.chatPush) {
+                  toast(s.digestNeedPush);
+                  return;
+                }
+                setState({ digestOn: !data.digestOn });
+                if (data.chatPush) await syncPush().catch(() => undefined);
+              }}
+            />
+            {data.digestOn && (
+              <>
+                <div className="muted xsmall mt12">{s.digestHour}</div>
+                <div className="row mt4" style={{ flexWrap: "wrap", gap: 8 }}>
+                  {[18, 19, 20, 21, 22, 23].map((hour) => (
+                    <button
+                      key={hour}
+                      type="button"
+                      className={data.digestHour === hour ? "chip on" : "chip"}
+                      onClick={async () => {
+                        setState({ digestHour: hour });
+                        if (data.chatPush) await syncPush().catch(() => undefined);
+                      }}
+                    >
+                      {hour}:00
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </Card>
+
       <Card title={s.settingsTitle}>
         <SettingRow title={s.themeSystem} hint={s.themeSystemHint} on={data.systemTheme} onToggle={() => setState({ systemTheme: !data.systemTheme })} />
         <SettingRow
@@ -224,7 +300,9 @@ export default function ProfileScreen() {
             syncPush();
           }}
         />
-        <SettingRow title={s.chatNotify} hint={user ? s.chatNotifyHint : s.chatNotifySignIn} on={data.chatPush} onToggle={togglePush} />
+        {allowsChats(data.notifyProfile) && (
+          <SettingRow title={s.chatNotify} hint={user ? s.chatNotifyHint : s.chatNotifySignIn} on={data.chatPush} onToggle={togglePush} />
+        )}
       </Card>
 
       <Card title={s.calendarSubTitle} hint={s.calendarSubHint}>
@@ -291,11 +369,12 @@ export default function ProfileScreen() {
         ))}
       </Card>
 
-      <Card title={s.backupSave} hint={s.backupHint}>
+      <Card title={s.exportData} hint={s.exportDataHint}>
         <div className="row mt4" style={{ marginLeft: -8, flexWrap: "wrap" }}>
-          <button className="tbtn" onClick={saveBackup}>{s.backupSave}</button>
+          <button className="tbtn" onClick={saveBackup}>{s.exportData}</button>
           <button className="tbtn" onClick={() => backupInput.current?.click()}>{s.backupLoad}</button>
         </div>
+        <div className="muted xsmall mt8">{s.noAdsNote}</div>
         <input
           ref={backupInput}
           type="file"

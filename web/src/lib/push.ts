@@ -24,10 +24,19 @@ async function current(): Promise<PushSubscription | null> {
 }
 
 async function upload(subscription: PushSubscription) {
-  const { hideProfanity, lang } = getState();
+  const { hideProfanity, lang, notifyProfile, digestOn, digestHour, group } = getState();
   await api("/api/push", {
     method: "POST",
-    body: JSON.stringify({ ...subscription.toJSON(), hideProfanity, lang: lang ?? "ru" }),
+    body: JSON.stringify({
+      ...subscription.toJSON(),
+      hideProfanity,
+      lang: lang ?? "ru",
+      notifyProfile,
+      digestOn,
+      digestHour,
+      groupId: group,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Moscow",
+    }),
   });
 }
 

@@ -32,7 +32,11 @@ object Sync {
     private val DATA_SECTIONS = setOf("fav", "notes", "subjectNotes", "todos", "absences", "limits", "hidden", "dayChanges")
 
     /** Settings this platform has; others (web-only) are kept on the server untouched. */
-    private val OWN_SETTINGS = setOf("dark", "systemTheme", "lang", "hideProfanity", "notify", "notifyLead", "ongoing")
+    private val OWN_SETTINGS = setOf(
+        "dark", "systemTheme", "lang", "hideProfanity",
+        "notify", "notifyLead", "ongoing",
+        "notifyProfile", "digest", "digestHour",
+    )
 
     private val statusFlow = MutableStateFlow(Status())
     val status: StateFlow<Status> = statusFlow.asStateFlow()
@@ -191,6 +195,9 @@ object Sync {
         put("settings", "notify", prefs.notifyEnabled())
         put("settings", "notifyLead", prefs.notifyLead())
         put("settings", "ongoing", prefs.ongoingLesson())
+        put("settings", "notifyProfile", prefs.notifyProfile())
+        put("settings", "digest", prefs.digestEnabled())
+        put("settings", "digestHour", prefs.digestHour())
         return out
     }
 
@@ -277,6 +284,9 @@ object Sync {
                     "notify" -> (value as? Boolean)?.let { prefs.setNotifyEnabled(it) }
                     "notifyLead" -> (value as? Number)?.let { prefs.setNotifyLead(it.toInt()) }
                     "ongoing" -> (value as? Boolean)?.let { prefs.setOngoingLesson(it) }
+                    "notifyProfile" -> prefs.setNotifyProfile(value.toString())
+                    "digest" -> (value as? Boolean)?.let { prefs.setDigestEnabled(it) }
+                    "digestHour" -> (value as? Number)?.let { prefs.setDigestHour(it.toInt()) }
                 }
             }
         }

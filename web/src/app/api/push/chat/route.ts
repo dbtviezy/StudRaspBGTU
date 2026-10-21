@@ -37,7 +37,10 @@ export const POST = handle(async (request: Request) => {
 
   await ensureSchema();
   const q = sql();
-  const targets = await q`SELECT endpoint, p256dh, auth, hide_profanity, lang FROM push_subscriptions WHERE user_id = ANY(${ids}::uuid[])`;
+  const targets = await q`
+    SELECT endpoint, p256dh, auth, hide_profanity, lang FROM push_subscriptions
+    WHERE user_id = ANY(${ids}::uuid[])
+      AND notify_profile IN ('normal', 'quiet')`;
   const group = chat.kind === "group";
   const gone: string[] = [];
   await Promise.all(

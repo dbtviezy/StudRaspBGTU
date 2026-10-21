@@ -1298,8 +1298,21 @@ fun ProfileScreen(
     var themeCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var avatarStamp by remember { mutableIntStateOf(0) }
     var pendingCrop by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var notifyProfile by remember { mutableStateOf(prefs.notifyProfile()) }
     var notifyOn by remember { mutableStateOf(prefs.notifyEnabled()) }
     var lead by remember { mutableIntStateOf(prefs.notifyLead()) }
+    var digestOn by remember { mutableStateOf(prefs.digestEnabled()) }
+    var digestHour by remember { mutableIntStateOf(prefs.digestHour()) }
+    fun refreshAlerts() {
+        val app = context.applicationContext
+        if (prefs.notifyEnabled()) ru.bgtu.schedule.notify.LessonAlerts.reschedule(app)
+        else ru.bgtu.schedule.notify.LessonAlerts.cancelAll(app)
+        if (prefs.digestEnabled()) ru.bgtu.schedule.notify.DigestAlerts.reschedule(app)
+        else ru.bgtu.schedule.notify.DigestAlerts.cancelAll(app)
+        ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(app)
+        Thread { ru.bgtu.schedule.notify.OngoingLesson.reschedule(app) }.start()
+        ru.bgtu.schedule.notify.ChatNotify.schedule(app)
+    }
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             pendingCrop?.recycle()
@@ -1332,13 +1345,6 @@ fun ProfileScreen(
             onRestored(restored.first, restored.second)
             profileTick++
             Toasts.show(s.backupRestored)
-        }
-    }
-    val notifyPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            notifyOn = true
-            prefs.setNotifyEnabled(true)
-            ru.bgtu.schedule.notify.LessonAlerts.reschedule(context)
         }
     }
     Column(
@@ -1428,6 +1434,16 @@ fun ProfileScreen(
         }
         Spacer(Modifier.height(12.dp))
         AccountCard(groupId = group.id, onOpenChats = onOpenChats)
+        val accountState by ru.bgtu.schedule.data.Account.state.collectAsState()
+        if (!accountState.signedIn) {
+            Spacer(Modifier.height(12.dp))
+            SoftCard {
+                ProfileCardTitle(s.more.guestTitle, s.more.guestHint)
+                TextButton(onClick = { ru.bgtu.schedule.ui.AppSignals.signIn = true }) {
+                    Text(s.more.guestSignIn, color = Blue)
+                }
+            }
+        }
         if (ru.bgtu.schedule.BuildConfig.ADMIN) {
             Spacer(Modifier.height(12.dp))
             SoftCard(onClick = onOpenAdmin) {
@@ -1460,39 +1476,34 @@ fun ProfileScreen(
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text(s.lessonReminder, color = Ink, fontWeight = FontWeight.SemiBold)
-                    Text(s.lessonReminderHint, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
-                }
-                Switch(
-                    checked = notifyOn,
-                    onCheckedChange = { enabled ->
-                        if (!enabled) {
-                            notifyOn = false
-                            prefs.setNotifyEnabled(false)
-                            ru.bgtu.schedule.notify.LessonAlerts.cancelAll(context)
-                        } else if (Build.VERSION.SDK_INT >= 33 &&
-                            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                        ) {
-                            notifyPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            notifyOn = true
-                            prefs.setNotifyEnabled(true)
-                            ru.bgtu.schedule.notify.LessonAlerts.reschedule(context)
+            ProfileCardTitle(s.more.notifyProfilesTitle, s.more.notifyProfilesHint)
+            Text(s.more.notifyProfileHint(notifyProfile), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ru.bgtu.schedule.data.NotifyProfile.ALL.forEach { id ->
+                    FilterChip(s.more.notifyProfileLabel(id), notifyProfile == id) {
+                        val apply = {
+                            prefs.setNotifyProfile(id)
+                            notifyProfile = id
+                            notifyOn = prefs.notifyEnabled()
+                            digestOn = prefs.digestEnabled()
+                            chatNotifyOn = prefs.chatNotify()
+                            ongoingOn = prefs.ongoingLesson()
+                            refreshAlerts()
                         }
-                    },
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = Blue,
-                        checkedThumbColor = Color.White,
-                        uncheckedTrackColor = Line,
-                        uncheckedThumbColor = Color.White,
-                        uncheckedBorderColor = Line,
-                    ),
-                )
+                        if (id == ru.bgtu.schedule.data.NotifyProfile.OFF || id == ru.bgtu.schedule.data.NotifyProfile.SESSION) apply()
+                        else withNotifications(apply)
+                    }
+                }
             }
-            if (notifyOn) {
-                Spacer(Modifier.height(10.dp))
+            if (ru.bgtu.schedule.data.NotifyProfile.allowsLessons(notifyProfile)) {
+                Spacer(Modifier.height(12.dp))
+                Text(s.lessonReminder, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(s.lessonReminderHint, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1517,6 +1528,34 @@ fun ProfileScreen(
                     }
                 }
             }
+            if (ru.bgtu.schedule.data.NotifyProfile.allowsDigest(notifyProfile)) {
+                Spacer(Modifier.height(12.dp))
+                SettingSwitch(s.more.digestSwitch, s.more.digestSwitchHint, digestOn) { on ->
+                    val apply = {
+                        digestOn = on
+                        prefs.setDigestEnabled(on)
+                        if (on) ru.bgtu.schedule.notify.DigestAlerts.reschedule(context)
+                        else ru.bgtu.schedule.notify.DigestAlerts.cancelAll(context)
+                    }
+                    if (on) withNotifications(apply) else apply()
+                }
+                if (digestOn) {
+                    Text(s.more.digestHour, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        (18..23).forEach { hour ->
+                            FilterChip("$hour:00", digestHour == hour) {
+                                digestHour = hour
+                                prefs.setDigestHour(hour)
+                                ru.bgtu.schedule.notify.DigestAlerts.reschedule(context)
+                            }
+                        }
+                    }
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {
@@ -1526,34 +1565,37 @@ fun ProfileScreen(
                 AppSignals.hideProfanity = on
                 prefs.setHideProfanity(on)
             }
-            val account by ru.bgtu.schedule.data.Account.state.collectAsState()
-            SettingSwitch(
-                s.more.chatNotify,
-                if (account.signedIn) s.more.chatNotifyHint else s.more.chatNotifySignIn,
-                chatNotifyOn,
-            ) { on ->
-                if (!on) {
-                    chatNotifyOn = false
-                    prefs.setChatNotify(false)
-                    ru.bgtu.schedule.notify.ChatNotify.schedule(context)
-                } else if (!account.signedIn) {
-                    Toasts.show(s.more.chatNotifySignIn)
-                } else {
-                    withNotifications {
-                        chatNotifyOn = true
-                        prefs.setChatNotify(true)
-                        ru.bgtu.schedule.notify.ChatNotify.markSeen(context)
+            if (ru.bgtu.schedule.data.NotifyProfile.allowsChats(notifyProfile)) {
+                SettingSwitch(
+                    s.more.chatNotify,
+                    if (accountState.signedIn) s.more.chatNotifyHint else s.more.chatNotifySignIn,
+                    chatNotifyOn,
+                ) { on ->
+                    if (!on) {
+                        chatNotifyOn = false
+                        prefs.setChatNotify(false)
                         ru.bgtu.schedule.notify.ChatNotify.schedule(context)
+                    } else if (!accountState.signedIn) {
+                        Toasts.show(s.more.chatNotifySignIn)
+                    } else {
+                        withNotifications {
+                            chatNotifyOn = true
+                            prefs.setChatNotify(true)
+                            ru.bgtu.schedule.notify.ChatNotify.markSeen(context)
+                            ru.bgtu.schedule.notify.ChatNotify.schedule(context)
+                        }
                     }
                 }
             }
-            SettingSwitch(s.more.ongoingLesson, s.more.ongoingLessonHint, ongoingOn) { on ->
-                val apply = {
-                    ongoingOn = on
-                    prefs.setOngoingLesson(on)
-                    Thread { ru.bgtu.schedule.notify.OngoingLesson.reschedule(context) }.start()
+            if (ru.bgtu.schedule.data.NotifyProfile.allowsOngoing(notifyProfile)) {
+                SettingSwitch(s.more.ongoingLesson, s.more.ongoingLessonHint, ongoingOn) { on ->
+                    val apply = {
+                        ongoingOn = on
+                        prefs.setOngoingLesson(on)
+                        Thread { ru.bgtu.schedule.notify.OngoingLesson.reschedule(context) }.start()
+                    }
+                    if (on) withNotifications(apply) else apply()
                 }
-                if (on) withNotifications(apply) else apply()
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -1691,11 +1733,12 @@ fun ProfileScreen(
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {
-            ProfileCardTitle(s.backupSave, s.backupHint)
+            ProfileCardTitle(s.more.exportData, s.more.exportDataHint)
             Row {
-                TextButton(onClick = { saveBackup.launch("studrasp-backup-${LocalDate.now()}.json") }) { Text(s.backupSave, color = Blue) }
+                TextButton(onClick = { saveBackup.launch("studrasp-data-${LocalDate.now()}.json") }) { Text(s.more.exportData, color = Blue) }
                 TextButton(onClick = { loadBackup.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Text(s.backupLoad, color = Blue) }
             }
+            Text(s.more.noAdsNote, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         }
         Spacer(Modifier.height(12.dp))
         SoftCard {

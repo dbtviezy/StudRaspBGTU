@@ -37,14 +37,23 @@ export const POST = handle(async (request: Request) => {
   const auth = cleanKey(keys.auth);
   const hide = body.hideProfanity === true;
   const lang = body.lang === "en" ? "en" : "ru";
+  const profile =
+    body.notifyProfile === "quiet" || body.notifyProfile === "session" || body.notifyProfile === "off" || body.notifyProfile === "normal"
+      ? body.notifyProfile
+      : "normal";
+  const digestOn = body.digestOn === true && profile === "normal";
+  const digestHour = Math.min(23, Math.max(18, Math.round(Number(body.digestHour) || 21)));
+  const groupId = typeof body.groupId === "string" ? body.groupId.trim().slice(0, 40) : "";
+  const timeZone = typeof body.timeZone === "string" && body.timeZone.length <= 64 ? body.timeZone.trim() : "Europe/Moscow";
   const userId = String(user.id);
   await ensureSchema();
   const q = sql();
   await q`
-    INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, hide_profanity, lang)
-    VALUES (${endpoint}, ${userId}::uuid, ${p256dh}, ${auth}, ${hide}, ${lang})
+    INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, hide_profanity, lang, notify_profile, digest_on, digest_hour, group_id, time_zone)
+    VALUES (${endpoint}, ${userId}::uuid, ${p256dh}, ${auth}, ${hide}, ${lang}, ${profile}, ${digestOn}, ${digestHour}, ${groupId}, ${timeZone})
     ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id, p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth,
-      hide_profanity = EXCLUDED.hide_profanity, lang = EXCLUDED.lang`;
+      hide_profanity = EXCLUDED.hide_profanity, lang = EXCLUDED.lang, notify_profile = EXCLUDED.notify_profile,
+      digest_on = EXCLUDED.digest_on, digest_hour = EXCLUDED.digest_hour, group_id = EXCLUDED.group_id, time_zone = EXCLUDED.time_zone`;
   await q`
     DELETE FROM push_subscriptions WHERE user_id = ${userId}::uuid AND endpoint NOT IN (
       SELECT endpoint FROM push_subscriptions WHERE user_id = ${userId}::uuid ORDER BY created_at DESC LIMIT ${MAX_DEVICES}

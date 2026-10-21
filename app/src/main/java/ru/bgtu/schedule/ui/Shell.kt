@@ -188,7 +188,10 @@ fun BgtuApp() {
             withContext(Dispatchers.IO) {
                 ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(context.applicationContext)
                 if (prefs.notifyEnabled()) LessonAlerts.reschedule(context.applicationContext) else LessonAlerts.cancelAll(context.applicationContext)
+                if (prefs.digestEnabled()) ru.bgtu.schedule.notify.DigestAlerts.reschedule(context.applicationContext)
+                else ru.bgtu.schedule.notify.DigestAlerts.cancelAll(context.applicationContext)
                 ru.bgtu.schedule.notify.OngoingLesson.reschedule(context.applicationContext)
+                ru.bgtu.schedule.notify.ChatNotify.schedule(context.applicationContext)
             }
         }
     }
@@ -199,6 +202,9 @@ fun BgtuApp() {
             withContext(Dispatchers.IO) {
                 ru.bgtu.schedule.notify.DeadlineAlerts.reschedule(context.applicationContext)
                 if (prefs.notifyEnabled()) LessonAlerts.reschedule(context.applicationContext)
+                else LessonAlerts.cancelAll(context.applicationContext)
+                if (prefs.digestEnabled()) ru.bgtu.schedule.notify.DigestAlerts.reschedule(context.applicationContext)
+                else ru.bgtu.schedule.notify.DigestAlerts.cancelAll(context.applicationContext)
                 ru.bgtu.schedule.notify.OngoingLesson.reschedule(context.applicationContext)
                 ru.bgtu.schedule.notify.ChatNotify.schedule(context.applicationContext)
             }
