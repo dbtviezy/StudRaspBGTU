@@ -16,6 +16,6 @@ export const POST = handle(async (request: Request) => {
   if (!config) throw new ApiError(503, "chat_not_configured");
   const user = await requireUser(request);
   await assertNotBanned(null, String(user.id));
-  const { token, expiresAt } = supabaseToken(publicUser(user));
+  const { token, expiresAt } = await supabaseToken(publicUser(user));
   return json({ url: config.url, anonKey: config.anonKey, token, expiresAt, userId: String(user.id) });
 });

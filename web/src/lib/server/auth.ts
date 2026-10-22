@@ -241,24 +241,86 @@ export async function verifyGoogle(credential: unknown): Promise<GoogleProfile> 
   return { sub, name };
 }
 
-/** HS256 JWT signed with the project's Supabase JWT secret, so Postgres RLS sees `auth.uid()` = our user id. */
-export function supabaseToken(user: PublicUser, ttlSeconds = 3600): { token: string; expiresAt: number } {
-  const secret = process.env.SUPABASE_JWT_SECRET;
-  if (!secret) throw new ApiError(503, "chat_not_configured");
-  const now = Math.floor(Date.now() / 1000);
-  const expiresAt = now + ttlSeconds;
-  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-  const head = encode({ alg: "HS256", typ: "JWT" });
-  const body = encode({
-    sub: user.id,
-    role: "authenticated",
-    aud: "authenticated",
-    iat: now,
-    exp: expiresAt,
-    user_metadata: { name: user.name },
+/**
+ * Real Supabase Auth access token for this app user (same UUID as Neon).
+ * Projects with JWT Signing Keys (ES256) reject hand-rolled HS256 tokens — mint via Admin API instead.
+ */
+export async function supabaseToken(user: PublicUser): Promise<{ token: string; expiresAt: number }> {
+  const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, "");
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
+  if (!url || !serviceKey || !anonKey) throw new ApiError(503, "chat_not_configured");
+
+  const email = `${user.id.replace(/-/g, "")}@chat.local`;
+  const admin = {
+    apikey: serviceKey,
+    Authorization: `Bearer ${serviceKey}`,
+    "Content-Type": "application/json",
+  };
+
+  const existing = await fetch(`${url}/auth/v1/admin/users/${user.id}`, { headers: admin, cache: "no-store" });
+  if (existing.status === 404) {
+    const created = await fetch(`${url}/auth/v1/admin/users`, {
+      method: "POST",
+      headers: admin,
+      body: JSON.stringify({
+        id: user.id,
+        email,
+        email_confirm: true,
+        password: randomBytes(24).toString("base64url"),
+        user_metadata: { name: user.name },
+      }),
+      cache: "no-store",
+    });
+    if (!created.ok) {
+      console.error("supabase create user", created.status, await created.text().catch(() => ""));
+      throw new ApiError(502, "chat_unavailable");
+    }
+  } else if (existing.ok) {
+    await fetch(`${url}/auth/v1/admin/users/${user.id}`, {
+      method: "PUT",
+      headers: admin,
+      body: JSON.stringify({ email, user_metadata: { name: user.name } }),
+      cache: "no-store",
+    }).catch(() => undefined);
+  } else {
+    console.error("supabase get user", existing.status, await existing.text().catch(() => ""));
+    throw new ApiError(502, "chat_unavailable");
+  }
+
+  const linkRes = await fetch(`${url}/auth/v1/admin/generate_link`, {
+    method: "POST",
+    headers: admin,
+    body: JSON.stringify({ type: "magiclink", email }),
+    cache: "no-store",
   });
-  const signature = createHmac("sha256", secret).update(`${head}.${body}`).digest("base64url");
-  return { token: `${head}.${body}.${signature}`, expiresAt: expiresAt * 1000 };
+  const link = (await linkRes.json().catch(() => ({}))) as { email_otp?: string };
+  if (!linkRes.ok || !link.email_otp) {
+    console.error("supabase generate_link", linkRes.status, link);
+    throw new ApiError(502, "chat_unavailable");
+  }
+
+  const verifyRes = await fetch(`${url}/auth/v1/verify`, {
+    method: "POST",
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${anonKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "magiclink", email, token: link.email_otp }),
+    cache: "no-store",
+  });
+  const session = (await verifyRes.json().catch(() => ({}))) as {
+    access_token?: string;
+    expires_at?: number;
+  };
+  if (!verifyRes.ok || !session.access_token) {
+    console.error("supabase verify", verifyRes.status, session);
+    throw new ApiError(502, "chat_unavailable");
+  }
+
+  const expiresAt = typeof session.expires_at === "number" ? session.expires_at * 1000 : Date.now() + 3600_000;
+  return { token: session.access_token, expiresAt };
 }
 
 function adminKey(): Buffer {

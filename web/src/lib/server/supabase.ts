@@ -8,7 +8,7 @@ export interface ChatConfig {
 export function chatConfig(): ChatConfig | null {
   const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, "");
   const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
-  return url && anonKey && process.env.SUPABASE_JWT_SECRET ? { url, anonKey } : null;
+  return url && anonKey && process.env.SUPABASE_SERVICE_ROLE_KEY ? { url, anonKey } : null;
 }
 
 /** Calls Supabase REST with the service role key (bypasses RLS) — moderation only. */
