@@ -1,7 +1,7 @@
 -- Chat schema for Supabase (run once in Supabase → SQL Editor).
--- Accounts live in Neon; our API (/api/chat/token) signs Supabase JWTs with SUPABASE_JWT_SECRET,
--- so auth.uid() here is the user id from the Neon `users` table and the display name comes from
--- the signed claim user_metadata.name.
+-- Accounts live in Neon; our API (/api/chat/token) mints a real Supabase Auth JWT for the same
+-- user id (via service role), so auth.uid() here matches Neon `users.id` and the display name
+-- comes from Auth user_metadata.name.
 
 create extension if not exists pgcrypto;
 
