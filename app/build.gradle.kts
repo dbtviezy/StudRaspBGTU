@@ -12,13 +12,35 @@ android {
         applicationId = "ru.bgtu.schedule"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
+        manifestPlaceholders["authScheme"] = "studraspbgtu"
+    }
+
+    flavorDimensions += "role"
+    productFlavors {
+        create("student") {
+            dimension = "role"
+            buildConfigField("boolean", "ADMIN", "false")
+        }
+        // Separate app with moderation tools; installs next to the student app.
+        create("admin") {
+            dimension = "role"
+            applicationIdSuffix = ".admin"
+            versionNameSuffix = "-admin"
+            buildConfigField("boolean", "ADMIN", "true")
+            manifestPlaceholders["authScheme"] = "studraspbgtu-admin"
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -34,6 +56,17 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+}
+
+android.applicationVariants.all {
+    val variant = this
+    val version = variant.versionName.removeSuffix("-admin")
+    val name = if (variant.flavorName == "admin") "StudRaspBGTU-Admin-v$version" else "StudRaspBGTU-v$version"
+    variant.outputs.all {
+        (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName =
+            if (variant.buildType.name == "release") "$name.apk" else "$name-${variant.buildType.name}.apk"
     }
 }
 
@@ -50,5 +83,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+    implementation("com.google.android.gms:play-services-nearby:19.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

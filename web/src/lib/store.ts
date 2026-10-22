@@ -37,6 +37,18 @@ export interface Data {
   favoriteTeachers: string[];
   todos: TodoItem[];
   fileTags: Record<string, string[]>;
+  systemTheme: boolean;
+  hideProfanity: boolean;
+  chatPush: boolean;
+  /** normal | quiet | session | off — see lib/notify.ts */
+  notifyProfile: "normal" | "quiet" | "session" | "off";
+  digestOn: boolean;
+  /** Local hour 18..23 for the evening digest. */
+  digestHour: number;
+  /** Last app version whose "What's new" screen was shown. */
+  seenVersion: string | null;
+  /** The one-time "sign in" suggestion was shown. */
+  loginOffered: boolean;
 }
 
 const DEFAULTS: Data = {
@@ -55,11 +67,19 @@ const DEFAULTS: Data = {
   favoriteTeachers: [],
   todos: [],
   fileTags: {},
+  systemTheme: false,
+  hideProfanity: false,
+  chatPush: false,
+  notifyProfile: "normal",
+  digestOn: false,
+  digestHour: 21,
+  seenVersion: null,
+  loginOffered: false,
 };
 
 export const PREFIX = "studrasp.";
 const KEYS = Object.keys(DEFAULTS) as (keyof Data)[];
-const KEPT_ON_RESET: (keyof Data)[] = ["lang", "dark", "onboarded"];
+const KEPT_ON_RESET: (keyof Data)[] = ["lang", "dark", "onboarded", "systemTheme", "seenVersion"];
 
 let state: Data = DEFAULTS;
 let loaded = false;
@@ -101,6 +121,14 @@ export function setState(patch: Partial<Data> | ((d: Data) => Partial<Data>)) {
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Runs `listener` after every data change; returns the unsubscribe function. */
+export function onDataChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function useStore(): Data {

@@ -392,7 +392,79 @@ data class Copy(
         "Скопировано в память приложения: $names. Это отдельная копия на телефоне, оригинал можно удалить."
     }
 
-    fun periodLabel(raw: String): String = if (code == "en") raw.replace("семестр", "semester") else raw
+    val more: MoreCopy get() = if (code == "en") MoreEn else MoreRu
+
+    val acc: AccountCopy get() = if (code == "en") AccountEn else AccountRu
+
+    /** Like [errorText], but spells out restrictions (what, until when, why) from the error details. */
+    fun failureText(failure: ru.bgtu.schedule.data.ApiFailure): String {
+        val extra = failure.extra
+        if ((failure.code == "restricted" || failure.code == "banned") && extra.has("scope")) {
+            val until = if (extra.isNull("until")) null else extra.optString("until").ifBlank { null }
+            return acc.restrictionText(extra.optString("scope"), until, extra.optString("reason"), more.banned)
+        }
+        if (failure.code == "account_too_new" && extra.optString("until").isNotBlank()) return acc.accountTooNew(extra.optString("until"))
+        return errorText(failure.code)
+    }
+
+    fun restrictionText(restriction: ru.bgtu.schedule.data.Restriction): String =
+        acc.restrictionText(restriction.scope, restriction.until, restriction.reason, more.banned)
+
+    fun periodLabel(raw: String): String =
+        if (code == "en") raw.replace(Regex("""(\d+)\s*семестр"""), "semester $1").replace("семестр", "semester") else raw
+
+    fun facultyName(raw: String): String = if (code == "en") FACULTIES_EN[raw.trim()] ?: raw else raw
+
+    fun roomName(raw: String): String = if (code != "en") raw else raw
+        .replace("Читальный зал", "Reading room")
+        .replace("Спортивный зал", "Gym")
+        .replace("Лаборатория", "Lab")
+
+    fun teacherGroups(count: Int): String = if (code == "en") {
+        if (count == 1) "teaches 1 group" else "teaches $count groups"
+    } else {
+        val mod100 = count % 100
+        "ведёт у $count ${if (count % 10 == 1 && mod100 != 11) "группы" else "групп"}"
+    }
+
+    fun unreadCount(count: Int): String = if (count > 99) "99+" else count.toString()
+
+    fun formatBytes(size: Long): String {
+        val en = code == "en"
+        return when {
+            size < 1024 -> "$size ${if (en) "B" else "Б"}"
+            size < 1024 * 1024 -> "${size / 1024} ${if (en) "KB" else "КБ"}"
+            else -> String.format(if (en) Locale.US else Locale("ru"), "%.1f %s", size / 1048576.0, if (en) "MB" else "МБ")
+        }
+    }
+
+    /** Human text for an error code returned by our API or the chat server. */
+    fun errorText(code: String): String = when (code) {
+        "offline", "db_unavailable", "not_configured", "server_error", "chat_unavailable", "provider_unavailable" -> more.serverOff
+        "chat_not_configured" -> more.chatsOff
+        "provider_disabled" -> more.providerOff
+        "rate_limited" -> more.tooMany
+        "wrong_credentials" -> more.wrongCredentials
+        "login_taken" -> more.loginTaken
+        "invalid_login" -> more.badLogin
+        "invalid_password" -> more.badPassword
+        "invalid_name" -> more.badName
+        "already_linked" -> more.alreadyLinked
+        "last_method" -> more.lastMethod
+        "banned" -> more.banned
+        "restricted" -> more.forbidden
+        "muted" -> acc.muted
+        "no_create" -> acc.noCreate
+        "social_required", "account_too_new" -> acc.socialRequired
+        "device_used" -> acc.deviceUsed
+        "already_rep" -> acc.alreadyRep
+        "own_review" -> more.ownReview
+        "invalid_code" -> more.invalidCode
+        "user_not_found" -> more.userNotFound
+        "forbidden", "unauthorized" -> more.forbidden
+        "text_too_long" -> ratingError(code)
+        else -> more.somethingWrong
+    }
 
     fun levelName(raw: String): String {
         val key = raw.trim().lowercase()
@@ -487,7 +559,7 @@ data class Copy(
         "$count $word"
     }
 
-    fun hiddenSection(count: Int): String = if (code == "en") "Hidden · $count" else "Скрыто · $count"
+    fun hiddenSection(count: Int): String = if (code == "en") "Hidden ($count)" else "Скрыто ($count)"
 
     fun resetFiles(count: Int, size: String): String = if (code == "en") {
         "Also delete files copied into the app ($count · $size)"
@@ -512,9 +584,10 @@ data class Copy(
     fun ratingError(reason: String): String = when (reason) {
         "offline" -> ratingOffline
         "rate_limited" -> if (code == "en") "Too many changes. Try again in an hour." else "Слишком много изменений. Попробуйте через час."
-        "text_too_long" -> if (code == "en") "The review is longer than 300 characters." else "Отзыв длиннее 300 символов."
-        "unknown_teacher" -> if (code == "en") "This teacher is not in the schedule." else "Такого преподавателя нет в расписании."
-        else -> if (code == "en") "Could not save. Try again later." else "Не получилось сохранить. Попробуйте позже."
+        "text_too_long" -> if (code == "en") "The review is longer than 300 characters" else "Отзыв длиннее 300 символов"
+        "unknown_teacher" -> if (code == "en") "This teacher is not in the schedule" else "Этого преподавателя нет в расписании"
+        "banned" -> more.banned
+        else -> more.ratingFailed
     }
 
     fun leadOptions(): List<Pair<Int, String>> = listOf(
@@ -525,6 +598,15 @@ data class Copy(
         30 to lead30,
     )
 }
+
+private val FACULTIES_EN = mapOf(
+    "Механико-технологический факультет" to "Faculty of Mechanical Engineering and Technology",
+    "Учебно-научный институт транспорта" to "Institute of Transport",
+    "Учебно-научный технологический институт" to "Institute of Technology",
+    "Факультет информационных технологий" to "Faculty of Information Technology",
+    "Факультет отраслевой и цифровой экономики" to "Faculty of Industrial and Digital Economics",
+    "Факультет энергетики и электроники" to "Faculty of Power Engineering and Electronics",
+)
 
 fun copyOf(code: String?): Copy = if (code == "en") CopyEn else CopyRu
 

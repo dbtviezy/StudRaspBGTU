@@ -1,16 +1,34 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useAccount } from "@/lib/account";
 import { download, exportBackup, importBackup } from "@/lib/backup";
 import { APP_VERSION } from "@/lib/i18n";
+import { subscriptionUrl } from "@/lib/ics";
 import { clearFiles, setAvatar, useAvatar, useLibrary } from "@/lib/idb";
+import { allowsChats, allowsDigest, type NotifyProfileId, NOTIFY_PROFILES } from "@/lib/notify";
+import { disablePush, enablePush, syncPush } from "@/lib/push";
 import { weekInfo } from "@/lib/schedule";
 import { actions, setState, sortedTodos } from "@/lib/store";
 import { originOf, switchTheme } from "@/lib/theme";
 import { useShell } from "../context";
 import { Icon, TelegramIcon } from "../Icons";
+import { AccountCard } from "../overlays/Account";
 import CropPhoto from "../overlays/CropPhoto";
+import WhatsNew from "../overlays/WhatsNew";
 import { Alert, Detail, LanguageMark, Switch } from "../ui";
+
+function SettingRow({ title, hint, on, onToggle }: { title: string; hint: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div className="row mt12" style={{ gap: 12 }}>
+      <div className="grow">
+        <div className="semibold small">{title}</div>
+        <div className="muted xsmall mt2">{hint}</div>
+      </div>
+      <Switch on={on} label={title} onToggle={onToggle} />
+    </div>
+  );
+}
 
 function Card({ title, hint, children }: { title: string; hint?: string; children?: React.ReactNode }) {
   return (
@@ -23,7 +41,7 @@ function Card({ title, hint, children }: { title: string; hint?: string; childre
 }
 
 export default function ProfileScreen() {
-  const { bundle, s, data, today, faculty, group, openTasks, openFiles, setLanguage, pickGroup, pickFriend, onReset, toast } = useShell();
+  const { bundle, s, data, today, faculty, group, openTasks, openFiles, setLanguage, pickGroup, pickFriend, onReset, toast, signIn } = useShell();
   const avatar = useAvatar();
   const library = useLibrary();
   const photoInput = useRef<HTMLInputElement>(null);
@@ -32,7 +50,27 @@ export default function ProfileScreen() {
   const [resetting, setResetting] = useState(false);
   const [withFiles, setWithFiles] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [whatsNew, setWhatsNew] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const { user } = useAccount();
   const info = weekInfo(today, bundle.semesterStart);
+  const feed = subscriptionUrl(window.location.origin, group.id);
+  const webcal = feed.replace(/^https?:/, "webcal:");
+
+  const togglePush = async () => {
+    if (pushBusy) return;
+    if (data.chatPush) return disablePush();
+    if (!user) return toast(s.chatNotifySignIn);
+    setPushBusy(true);
+    try {
+      await enablePush();
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "";
+      setMessage(code === "unsupported" ? s.pushUnsupported : code === "denied" ? s.pushDenied : s.errorText(code));
+    } finally {
+      setPushBusy(false);
+    }
+  };
   const friend = data.friend ? bundle.find(data.friend) : null;
   const openTodos = sortedTodos(data.todos).filter((t) => !t.done);
   const initial = (data.name.trim() || s.studentFallback)[0]?.toUpperCase() ?? "?";
@@ -44,8 +82,24 @@ export default function ProfileScreen() {
   const subjectNotes = Object.entries(data.subjectNotes).filter(([, v]) => v.trim()).sort(([a], [b]) => a.localeCompare(b));
   const librarySize = library.reduce((sum, f) => sum + f.size, 0);
 
+  const profileLabel = (id: NotifyProfileId) =>
+    id === "quiet" ? s.notifyProfileQuiet : id === "session" ? s.notifyProfileSession : id === "off" ? s.notifyProfileOff : s.notifyProfileNormal;
+  const profileHint = (id: NotifyProfileId) =>
+    id === "quiet" ? s.notifyHintQuiet : id === "session" ? s.notifyHintSession : id === "off" ? s.notifyHintOff : s.notifyHintNormal;
+
+  const setNotifyProfile = async (id: NotifyProfileId) => {
+    const next = {
+      notifyProfile: id,
+      digestOn: allowsDigest(id) ? data.digestOn : false,
+      chatPush: allowsChats(id) ? data.chatPush : false,
+    };
+    setState(next);
+    if (!allowsChats(id) && data.chatPush) await disablePush();
+    else if (data.chatPush) await syncPush().catch(() => undefined);
+  };
+
   const saveBackup = () => {
-    download(`studrasp-backup-${today}.json`, exportBackup(library.map((f) => f.name)), "application/json");
+    download(`studrasp-data-${today}.json`, exportBackup(library.map((f) => f.name)), "application/json");
     toast(s.backupDone);
   };
 
@@ -132,13 +186,21 @@ export default function ProfileScreen() {
 
       <div className="card">
         <Detail label={s.group} value={group.id} />
-        <Detail label={s.faculty} value={faculty.name} />
+        <Detail label={s.faculty} value={s.facultyName(faculty.name)} />
         <Detail label={s.level} value={s.levelName(group.level)} />
         {group.year != null && <Detail label={s.cohort} value={s.cohortValue(group.year)} />}
         <Detail label={s.period} value={s.periodLabel(bundle.periodLabel) || "—"} />
         <Detail label={s.form} value={s.fullTimeForm} />
         <button className="btn mt12" onClick={pickGroup}>{s.changeGroup}</button>
       </div>
+
+      <AccountCard />
+
+      {!user && (
+        <Card title={s.guestTitle} hint={s.guestHint}>
+          <button className="btn mt12" onClick={signIn}>{s.signIn}</button>
+        </Card>
+      )}
 
       <Card title={s.secondGroup} hint={s.secondGroupHint}>
         {friend && <div className="semibold mt8">{`${friend.group.id} · ${friend.faculty.short}`}</div>}
@@ -174,15 +236,88 @@ export default function ProfileScreen() {
         </div>
       </button>
 
-      <Card title={s.weekHelpTitle}>
-        <div className="blue semibold small mt6">{s.weekNow(info.number, info.even)}</div>
-        <div className="small mt6" style={{ lineHeight: 1.45 }}>{s.weekHelp}</div>
-        <div className="muted xsmall mt8">{s.fetchedLine}</div>
-        {bundle.source && (
-          <a className="tbtn flush mt4" style={{ display: "inline-block" }} href={bundle.source} target="_blank" rel="noreferrer">
-            {s.openSite}
-          </a>
+      <Card title={s.notifyProfilesTitle} hint={s.notifyProfilesHint}>
+        <div className="muted small mt8">{profileHint(data.notifyProfile)}</div>
+        <div className="row mt8" style={{ flexWrap: "wrap", gap: 8 }}>
+          {NOTIFY_PROFILES.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={data.notifyProfile === id ? "chip on" : "chip"}
+              onClick={() => setNotifyProfile(id)}
+            >
+              {profileLabel(id)}
+            </button>
+          ))}
+        </div>
+        {allowsDigest(data.notifyProfile) && (
+          <>
+            <SettingRow
+              title={s.digestSwitch}
+              hint={s.digestSwitchHint}
+              on={data.digestOn}
+              onToggle={async () => {
+                if (!data.digestOn && !data.chatPush) {
+                  toast(s.digestNeedPush);
+                  return;
+                }
+                setState({ digestOn: !data.digestOn });
+                if (data.chatPush) await syncPush().catch(() => undefined);
+              }}
+            />
+            {data.digestOn && (
+              <>
+                <div className="muted xsmall mt12">{s.digestHour}</div>
+                <div className="row mt4" style={{ flexWrap: "wrap", gap: 8 }}>
+                  {[18, 19, 20, 21, 22, 23].map((hour) => (
+                    <button
+                      key={hour}
+                      type="button"
+                      className={data.digestHour === hour ? "chip on" : "chip"}
+                      onClick={async () => {
+                        setState({ digestHour: hour });
+                        if (data.chatPush) await syncPush().catch(() => undefined);
+                      }}
+                    >
+                      {hour}:00
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         )}
+      </Card>
+
+      <Card title={s.settingsTitle}>
+        <SettingRow title={s.themeSystem} hint={s.themeSystemHint} on={data.systemTheme} onToggle={() => setState({ systemTheme: !data.systemTheme })} />
+        <SettingRow
+          title={s.hideProfanity}
+          hint={s.hideProfanityHint}
+          on={data.hideProfanity}
+          onToggle={() => {
+            setState({ hideProfanity: !data.hideProfanity });
+            syncPush();
+          }}
+        />
+        {allowsChats(data.notifyProfile) && (
+          <SettingRow title={s.chatNotify} hint={user ? s.chatNotifyHint : s.chatNotifySignIn} on={data.chatPush} onToggle={togglePush} />
+        )}
+      </Card>
+
+      <Card title={s.calendarSubTitle} hint={s.calendarSubHint}>
+        <div className="row mt4" style={{ marginLeft: -8, flexWrap: "wrap" }}>
+          <a className="tbtn" href={webcal}>{s.calendarSubscribe}</a>
+          <a className="tbtn" href={`https://calendar.google.com/calendar/render?cid=${encodeURIComponent(webcal)}`} target="_blank" rel="noreferrer">
+            {s.calendarGoogle}
+          </a>
+          <button
+            className="tbtn"
+            onClick={() => navigator.clipboard?.writeText(feed).then(() => toast(s.linkCopied)).catch(() => setMessage(s.copyFailed))}
+          >
+            {s.copyLink}
+          </button>
+        </div>
       </Card>
 
       <Card title={s.absences} hint={subjects.length === 0 ? s.absencesEmpty : undefined}>
@@ -234,11 +369,12 @@ export default function ProfileScreen() {
         ))}
       </Card>
 
-      <Card title={s.backupSave} hint={s.backupHint}>
+      <Card title={s.exportData} hint={s.exportDataHint}>
         <div className="row mt4" style={{ marginLeft: -8, flexWrap: "wrap" }}>
-          <button className="tbtn" onClick={saveBackup}>{s.backupSave}</button>
+          <button className="tbtn" onClick={saveBackup}>{s.exportData}</button>
           <button className="tbtn" onClick={() => backupInput.current?.click()}>{s.backupLoad}</button>
         </div>
+        <div className="muted xsmall mt8">{s.noAdsNote}</div>
         <input
           ref={backupInput}
           type="file"
@@ -270,7 +406,23 @@ export default function ProfileScreen() {
         {s.resetData}
       </button>
 
-      <div className="muted xsmall" style={{ textAlign: "center" }}>{`${s.appName} ${APP_VERSION}`}</div>
+      <Card title={s.weekHelpTitle}>
+        <div className="blue semibold small mt6">{s.weekNow(info.number, info.even)}</div>
+        <div className="small mt6" style={{ lineHeight: 1.45 }}>{s.weekHelp}</div>
+        <div className="muted xsmall mt8">{s.fetchedLine}</div>
+        {bundle.source && (
+          <a className="tbtn flush mt4" style={{ display: "inline-block" }} href={bundle.source} target="_blank" rel="noreferrer">
+            {s.openSite}
+          </a>
+        )}
+      </Card>
+
+      <div className="muted xsmall" style={{ textAlign: "center" }}>
+        {`${s.appName} ${APP_VERSION} · `}
+        <button className="blue xsmall" onClick={() => setWhatsNew(true)}>{s.whatsNewLink}</button>
+      </div>
+
+      {whatsNew && <WhatsNew s={s} onClose={() => setWhatsNew(false)} />}
 
       {cropping && (
         <CropPhoto

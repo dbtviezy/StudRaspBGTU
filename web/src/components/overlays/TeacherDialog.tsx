@@ -2,12 +2,26 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Copy } from "@/lib/i18n";
-import { deleteReview, fetchTeacher, RatingError, type Review, saveReview, type Scores, type TeacherRatings, useSummaries } from "@/lib/ratings";
-import { nextTeacherLessons, splitTeachers, teacherHeading } from "@/lib/schedule";
+import {
+  deleteReview,
+  fetchTeacher,
+  RatingError,
+  reportReview,
+  type Review,
+  saveReview,
+  type Scores,
+  type TeacherRatings,
+  useSummaries,
+  voteReview,
+} from "@/lib/ratings";
+import { maskIf } from "@/lib/profanity";
+import { nextTeacherLessons, splitTeachers, teacherHeading, teacherWhere } from "@/lib/schedule";
 import { actions } from "@/lib/store";
+import { reviewBlock, useAccount } from "@/lib/account";
 import { useShell } from "../context";
 import { Icon } from "../Icons";
-import { Overlay, Sheet, StarPicker, Stars } from "../ui";
+import { Alert, Overlay, Sheet, StarPicker, Stars } from "../ui";
+import ReportDialog from "./Report";
 
 const MAX_TEXT = 300;
 
@@ -20,8 +34,38 @@ function errorText(s: Copy, error: unknown): string {
     case "rate_limited": return s.rateLimited;
     case "text_too_long": return s.textTooLong;
     case "unknown_teacher": return s.unknownTeacher;
+    case "banned":
+    case "restricted":
+    case "social_required":
+    case "account_too_new":
+    case "device_used":
+    case "own_review":
+    case "unauthorized": return s.failureText(error);
     default: return s.ratingFailed;
   }
+}
+
+/** Runs `action` only when signed in; otherwise explains why an account is needed and offers to sign in. */
+function useAccountGate(): [(action: () => void) => void, React.ReactNode] {
+  const { s, signIn } = useShell();
+  const { user } = useAccount();
+  const [asking, setAsking] = useState(false);
+  const gate = (action: () => void) => (user ? action() : setAsking(true));
+  const alert = asking ? (
+    <Alert title={s.needAccountTitle} text={s.needAccountText} onClose={() => setAsking(false)}>
+      <button className="tbtn muted" onClick={() => setAsking(false)}>{s.cancel}</button>
+      <button
+        className="tbtn"
+        onClick={() => {
+          setAsking(false);
+          signIn();
+        }}
+      >
+        {s.signIn}
+      </button>
+    </Alert>
+  ) : null;
+  return [gate, alert];
 }
 
 function shortDate(s: Copy, iso: string): string {
@@ -40,7 +84,65 @@ function ScoreRow({ label, value }: { label: string; value: number }) {
   );
 }
 
-function ReviewCard({ review, s, title }: { review: Review; s: Copy; title?: string }) {
+function VoteButton({ on, icon, count, label, onClick }: { on: boolean; icon: "thumbUp" | "thumbDown"; count: number; label: string; onClick: () => void }) {
+  return (
+    <button className={`vote${on ? " on" : ""}`} aria-label={label} aria-pressed={on} onClick={onClick}>
+      <Icon name={icon} size={16} />
+      <span>{count}</span>
+    </button>
+  );
+}
+
+function WhereCard({ name }: { name: string }) {
+  const { bundle, s, today, now } = useShell();
+  const where = teacherWhere(bundle, name, today, now);
+  const title = !where ? s.whereNone : where.inClass ? s.whereInClass : s.whereFree;
+  const when = !where
+    ? ""
+    : where.inClass
+      ? `${s.untilTime(where.lesson.end)} · ${s.leftPhrase(where.minutes)}`
+      : where.day === today
+        ? `${s.whereNext}: ${where.lesson.start} · ${s.untilPhrase(where.minutes)}`
+        : `${s.whereNext}: ${s.formatLongDate(where.day)}, ${where.lesson.start}`;
+  return (
+    <div className="card mt12">
+      <div className="muted xsmall semibold">{s.whereTitle.toUpperCase()}</div>
+      <div className={`semibold mt4 ${where?.inClass ? "blue" : ""}`}>{title}</div>
+      {where && (
+        <>
+          <div className="small mt2">{when}</div>
+          <div className="small mt6">
+            {[s.roomName(where.lesson.room), where.lesson.subject].filter(Boolean).join(" · ")}
+          </div>
+          <div className="muted xsmall mt2">{s.groupsLine(where.groups)}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReviewCard({ review, s, title, own }: { review: Review; s: Copy; title?: string; own?: boolean }) {
+  const { toast, data } = useShell();
+  const [votes, setVotes] = useState({ likes: review.likes ?? 0, dislikes: review.dislikes ?? 0, myVote: review.myVote ?? 0 });
+  const [reporting, setReporting] = useState(false);
+  const [gate, gateAlert] = useAccountGate();
+
+  const vote = async (value: number) => {
+    const next = votes.myVote === value ? 0 : value;
+    const previous = votes;
+    setVotes({
+      likes: votes.likes - (votes.myVote === 1 ? 1 : 0) + (next === 1 ? 1 : 0),
+      dislikes: votes.dislikes - (votes.myVote === -1 ? 1 : 0) + (next === -1 ? 1 : 0),
+      myVote: next,
+    });
+    try {
+      setVotes(await voteReview(review.id, next));
+    } catch (e) {
+      setVotes(previous);
+      toast(s.failureText(e));
+    }
+  };
+
   return (
     <div className="mt12" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
       <div className="row">
@@ -51,7 +153,30 @@ function ReviewCard({ review, s, title }: { review: Review; s: Copy; title?: str
       <div className="muted xsmall mt2">
         {`${s.delivery} ${review.delivery} · ${s.strictness} ${review.strictness} · ${s.loyalty} ${review.loyalty}`}
       </div>
-      {review.text && <div className="small mt4 pre" style={{ overflowWrap: "anywhere" }}>{review.text}</div>}
+      {review.text && <div className="small mt4 pre" style={{ overflowWrap: "anywhere" }}>{own ? review.text : maskIf(data.hideProfanity, review.text)}</div>}
+      {review.id > 0 && (
+        <div className="row mt6" style={{ gap: 6 }}>
+          {own ? (
+            <span className="row muted xsmall" style={{ gap: 4 }}>
+              <Icon name="thumbUp" size={14} />
+              {votes.likes}
+              <Icon name="thumbDown" size={14} />
+              {votes.dislikes}
+            </span>
+          ) : (
+            <>
+              <VoteButton on={votes.myVote === 1} icon="thumbUp" count={votes.likes} label={s.like} onClick={() => gate(() => vote(1))} />
+              <VoteButton on={votes.myVote === -1} icon="thumbDown" count={votes.dislikes} label={s.dislike} onClick={() => gate(() => vote(-1))} />
+              <span className="grow" />
+              <button className="icon-btn muted" aria-label={s.report} title={s.report} onClick={() => gate(() => setReporting(true))}>
+                <Icon name="flag" size={18} />
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {reporting && <ReportDialog onSend={(reason) => reportReview(review.id, reason)} onClose={() => setReporting(false)} />}
+      {gateAlert}
     </div>
   );
 }
@@ -144,12 +269,25 @@ function RatingSheet({ teacher, mine, onClose, onDone }: { teacher: string; mine
 
 function RatingCard({ name, showName }: { name: string; showName: boolean }) {
   const { s } = useShell();
+  const { user } = useAccount();
   const summaries = useSummaries();
   const [ratings, setRatings] = useState<TeacherRatings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rating, setRating] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [blocked, setBlocked] = useState<string | null>(null);
+  const [gate, gateAlert] = useAccountGate();
   const load = useCallback(() => setAttempt((n) => n + 1), []);
+  const userId = user?.id ?? null;
+
+  const startRating = () =>
+    gate(() => {
+      const block = reviewBlock(user);
+      if (block === "social") return setBlocked(s.socialRequired);
+      if (block && typeof block === "object") return setBlocked(s.accountTooNew(block.until));
+      setBlocked(null);
+      setRating(true);
+    });
 
   useEffect(() => {
     let alive = true;
@@ -163,11 +301,14 @@ function RatingCard({ name, showName }: { name: string; showName: boolean }) {
     return () => {
       alive = false;
     };
-  }, [name, attempt, s]);
+  }, [name, attempt, s, userId]);
 
   const summary = ratings?.summary ?? summaries.get(name) ?? null;
   const mine = ratings?.mine ?? null;
-  const others = (ratings?.reviews ?? []).filter((r) => !(mine && r.updatedAt === mine.updatedAt && r.text === mine.text && r.overall === mine.overall));
+  const mineNote = mine?.claimable
+    ? mine.hidden ? s.mineHiddenUnclaimed : s.legacyMine(ratings?.legacyUntil ?? null)
+    : null;
+  const others = (ratings?.reviews ?? []).filter((r) => !(mine && r.id === mine.id));
 
   return (
     <>
@@ -195,17 +336,19 @@ function RatingCard({ name, showName }: { name: string; showName: boolean }) {
             <button className="tbtn flush" onClick={load}>{s.retry}</button>
           </div>
         ) : (
-          <button className="btn compact mt12" disabled={!ratings} onClick={() => setRating(true)}>
+          <button className="btn compact mt12" disabled={!ratings} onClick={startRating}>
             {mine ? s.editReview : s.rateTeacher}
           </button>
         )}
-        {mine && <ReviewCard review={mine} s={s} title={s.yourReview} />}
+        {blocked && <div className="red small mt8">{blocked}</div>}
+        {mine && <ReviewCard key={`mine-${mine.updatedAt}`} review={mine} s={s} title={s.yourReview} own />}
+        {mineNote && <div className="red xsmall mt4">{mineNote}</div>}
         {ratings && (
           <>
             <h3 className="h3 mt16">{s.reviews}</h3>
             {others.length === 0 && !mine && <div className="muted small mt4">{s.noReviews}</div>}
             {others.map((review, index) => (
-              <ReviewCard key={`${review.updatedAt}-${index}`} review={review} s={s} />
+              <ReviewCard key={`${review.id}-${index}`} review={review} s={s} />
             ))}
           </>
         )}
@@ -221,6 +364,7 @@ function RatingCard({ name, showName }: { name: string; showName: boolean }) {
           }}
         />
       )}
+      {gateAlert}
     </>
   );
 }
@@ -250,6 +394,8 @@ export default function TeacherDialog({ name: raw, onClose }: { name: string; on
         </button>
       </div>
 
+      <WhereCard name={name} />
+
       {people.map((person) => (
         <RatingCard key={person} name={person} showName={people.length > 1} />
       ))}
@@ -267,7 +413,7 @@ export default function TeacherDialog({ name: raw, onClose }: { name: string; on
                   <span className="bold small" style={{ width: 48 }}>{item.lesson.start}</span>
                   <div className="grow">
                     <div className="semibold small">{item.lesson.subject}</div>
-                    <div className="muted xsmall">{[item.groupId, item.facultyShort, item.lesson.room, s.lessonType(item.lesson.type)].filter(Boolean).join(" · ")}</div>
+                    <div className="muted xsmall">{[item.groupId, item.facultyShort, s.roomName(item.lesson.room), s.lessonType(item.lesson.type)].filter(Boolean).join(" · ")}</div>
                   </div>
                 </div>
               </div>

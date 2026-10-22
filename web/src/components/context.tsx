@@ -38,6 +38,8 @@ export interface Shell {
   pickGroup: () => void;
   pickFriend: () => void;
   onReset: () => void;
+  /** Opens the sign-in sheet. */
+  signIn: () => void;
 }
 
 export const ShellContext = createContext<Shell | null>(null);

@@ -2,4 +2,6 @@
     <string name="app_name">StudRaspBGTU</string>
     <string name="widget_name">Schedule</string>
     <string name="widget_description">Classes for the selected weekday</string>
+    <string name="widget_week_name">Week schedule</string>
+    <string name="widget_week_description">All classes of the current week</string>
 </resources>

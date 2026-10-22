@@ -283,34 +283,53 @@ export function dayRows(lessons: Lesson[]): DayRow[] {
   return rows;
 }
 
-export interface TeacherHit {
-  teacher: string;
-  groupId: string;
-  facultyShort: string;
-  lesson: Lesson;
+/** One person from the schedule; a lesson with two teachers counts for each of them. */
+export interface TeacherCard {
+  name: string;
+  subjects: string[];
+  groups: number;
+  mine: boolean;
 }
 
 const cmp = (a: string | number, b: string | number) => (a < b ? -1 : a > b ? 1 : 0);
 
-export function searchTeachers(bundle: Bundle, query: string): TeacherHit[] {
-  const text = query.trim().toLowerCase();
-  if (text.length < 2) return [];
-  const seen = new Set<string>();
-  const hits: TeacherHit[] = [];
-  for (const { faculty, group } of bundle.groups) {
+const directories = new WeakMap<Bundle, Map<string, { subjects: Set<string>; groups: Set<string> }>>();
+
+function teacherDirectory(bundle: Bundle) {
+  let directory = directories.get(bundle);
+  if (directory) return directory;
+  directory = new Map();
+  for (const { group } of bundle.groups) {
     for (const lesson of group.lessons) {
-      if (!lesson.teacher.toLowerCase().includes(text)) continue;
-      const id = `${lesson.teacher}|${group.id}|${lesson.key}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      hits.push({ teacher: lesson.teacher, groupId: group.id, facultyShort: faculty.short, lesson });
+      for (const name of splitTeachers(lesson.teacher)) {
+        let entry = directory.get(name);
+        if (!entry) directory.set(name, (entry = { subjects: new Set(), groups: new Set() }));
+        if (lesson.subject) entry.subjects.add(lesson.subject);
+        entry.groups.add(group.id);
+      }
     }
   }
-  return hits
-    .sort((a, b) =>
-      cmp(a.teacher, b.teacher) || cmp(a.lesson.day, b.lesson.day) || cmp(a.lesson.start, b.lesson.start) || cmp(a.groupId, b.groupId),
-    )
-    .slice(0, 60);
+  directories.set(bundle, directory);
+  return directory;
+}
+
+/** Teachers of `mine` first, then everyone else, each list alphabetical. An empty query lists only `mine`. */
+export function searchTeachers(bundle: Bundle, query: string, mine: Group): TeacherCard[] {
+  const text = query.trim().toLowerCase();
+  const own = new Set(mine.lessons.flatMap((l) => splitTeachers(l.teacher)));
+  const cards: TeacherCard[] = [];
+  for (const [name, entry] of teacherDirectory(bundle)) {
+    const isMine = own.has(name);
+    if (text ? !name.toLowerCase().includes(text) : !isMine) continue;
+    cards.push({ name, subjects: [...entry.subjects].sort(), groups: entry.groups.size, mine: isMine });
+  }
+  return cards.sort((a, b) => Number(b.mine) - Number(a.mine) || a.name.localeCompare(b.name, "ru")).slice(0, 80);
+}
+
+function teachesLesson(people: string[], raw: string, lesson: Lesson): boolean {
+  if (lesson.teacher.trim().toLowerCase() === raw) return true;
+  const names = splitTeachers(lesson.teacher);
+  return people.some((person) => names.includes(person));
 }
 
 export interface TeacherNext {
@@ -329,10 +348,11 @@ export function nextTeacherLessons(
 ): TeacherNext[] {
   const name = teacher.trim().toLowerCase();
   if (!name) return [];
+  const people = splitTeachers(teacher);
   const hits: TeacherNext[] = [];
   for (const { faculty, group } of bundle.groups) {
     for (const lesson of group.lessons) {
-      if (lesson.teacher.trim().toLowerCase() === name) hits.push({ day: "", groupId: group.id, facultyShort: faculty.short, lesson });
+      if (teachesLesson(people, name, lesson)) hits.push({ day: "", groupId: group.id, facultyShort: faculty.short, lesson });
     }
   }
   if (!hits.length) return [];
@@ -355,6 +375,29 @@ export function nextTeacherLessons(
     }
   }
   return result;
+}
+
+/** The teacher's current class, or the next one if they are free; `groups` lists every group sitting in it. */
+export interface TeacherWhere {
+  inClass: boolean;
+  day: ISODate;
+  lesson: Lesson;
+  groups: string[];
+  /** Minutes left in the class, or until it starts today; -1 for a later day. */
+  minutes: number;
+}
+
+export function teacherWhere(bundle: Bundle, teacher: string, today: ISODate, now: Date): TeacherWhere | null {
+  const items = nextTeacherLessons(bundle, teacher, today, now, 30);
+  const first = items[0];
+  if (!first) return null;
+  const groups = [...new Set(items.filter((i) => i.day === first.day && i.lesson.start === first.lesson.start).map((i) => i.groupId))];
+  const nowM = minutesOf(now);
+  const start = toMinutes(first.lesson.start);
+  const end = toMinutes(first.lesson.end);
+  const inClass = first.day === today && start != null && end != null && nowM >= start && nowM < end;
+  const minutes = inClass ? Math.max(1, Math.floor(end! - nowM)) : first.day === today && start != null ? Math.max(0, Math.floor(start - nowM)) : -1;
+  return { inClass, day: first.day, lesson: first.lesson, groups, minutes };
 }
 
 const PAIR_STARTS = ["08:00", "09:45", "11:30", "13:20", "15:05", "16:50", "18:35", "20:00"];
@@ -399,6 +442,7 @@ export function splitTeachers(raw: string): string[] {
 }
 
 export function teacherHeading(raw: string): string {
+  if (new RegExp(TEACHER_NAME.source).test(raw)) return splitTeachers(raw).join("\n");
   const people = raw.split(/[,;/]|\s+и\s+/);
   const formatted = people.map(formatTeacher).filter(Boolean).join("\n");
   return formatted || raw.trim();

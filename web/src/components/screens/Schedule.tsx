@@ -138,7 +138,7 @@ export default function ScheduleScreen() {
     <div className="stack tight">
       <div>
         <h1 className="h1">{s.schedule}</h1>
-        <div className="muted small">{`${group.id} · ${faculty.name}`}</div>
+        <div className="muted small">{`${group.id} · ${s.facultyName(faculty.name)}`}</div>
         <div className="mt4" style={{ fontSize: 14 }}>{`${s.formatLongDateCap(date)} · ${s.evenWeekTitle(info.even)}`}</div>
         <div className="row" style={{ gap: 4, marginLeft: -8 }}>
           <button className="tbtn" onClick={share}>{s.shareDay}</button>

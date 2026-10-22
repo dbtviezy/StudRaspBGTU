@@ -11,7 +11,9 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import ru.bgtu.schedule.MainActivity
 import ru.bgtu.schedule.R
+import ru.bgtu.schedule.data.Buildings
 import ru.bgtu.schedule.data.Lesson
+import ru.bgtu.schedule.data.NotifyProfile
 import ru.bgtu.schedule.data.Prefs
 import ru.bgtu.schedule.data.ScheduleRepository
 import ru.bgtu.schedule.data.lessonsOn
@@ -29,7 +31,7 @@ object LessonAlerts {
         val manager = app.getSystemService(AlarmManager::class.java) ?: return
         cancel(app, manager)
         val prefs = Prefs(app)
-        if (!prefs.notifyEnabled()) return
+        if (!prefs.notifyEnabled() || !NotifyProfile.allowsLessons(prefs.notifyProfile())) return
         val groupId = prefs.groupId() ?: return
         val bundle = runCatching { ScheduleRepository.load(app) }.getOrNull() ?: return
         val group = bundle.find(groupId)?.second ?: return
@@ -41,12 +43,17 @@ object LessonAlerts {
             val start = parseTime(lesson.start) ?: return@forEachIndexed
             val fireAt = LocalDateTime.of(date, start).minusMinutes(lead.toLong())
             if (!fireAt.isAfter(now)) return@forEachIndexed
+            val dayLessons = dayLessons(app, group, bundle.semesterStart, date, hidden)
+            val at = dayLessons.indexOfFirst { it.key == lesson.key }
+            val previous = dayLessons.getOrNull(at - 1)
+            val otherBuilding = Buildings.different(previous?.room, lesson.room)
             val intent = Intent(app, LessonAlarmReceiver::class.java).apply {
                 putExtra("id", index + 1)
                 putExtra("subject", lesson.subject)
                 putExtra("time", lesson.time.ifBlank { lesson.start })
                 putExtra("room", lesson.room)
                 putExtra("lead", lead)
+                putExtra("otherBuilding", otherBuilding)
             }
             val pending = PendingIntent.getBroadcast(
                 app,
@@ -70,8 +77,10 @@ object LessonAlerts {
         val time = intent.getStringExtra("time").orEmpty()
         val room = intent.getStringExtra("room").orEmpty()
         val lead = intent.getIntExtra("lead", 0)
+        val otherBuilding = intent.getBooleanExtra("otherBuilding", false)
         val title = if (lead <= 0) copy.lessonStarts else copy.lessonIn(lead)
-        val text = listOf(subject, time, room).filter { it.isNotBlank() }.joinToString(" · ")
+        val base = listOf(subject, time, room).filter { it.isNotBlank() }.joinToString(" · ")
+        val text = if (otherBuilding) listOf(base, copy.more.otherBuildingHint).filter { it.isNotBlank() }.joinToString(" · ") else base
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
@@ -125,6 +134,20 @@ object LessonAlerts {
         }
     }
 
+    private fun dayLessons(
+        context: Context,
+        group: ru.bgtu.schedule.data.Group,
+        semesterStart: LocalDate,
+        date: LocalDate,
+        hidden: Set<String>,
+    ): List<Lesson> {
+        if (ru.bgtu.schedule.data.Holidays.on(date) != null) return emptyList()
+        val overrides = ru.bgtu.schedule.data.DayOverrides(context)
+        return lessonsOn(group, date.dayOfWeek.value, date, semesterStart, "auto")
+            .filter { it.key !in hidden }
+            .mapNotNull { overrides.apply(date, it) }
+    }
+
     private fun nextLessons(
         context: Context,
         group: ru.bgtu.schedule.data.Group,
@@ -133,18 +156,10 @@ object LessonAlerts {
         hidden: Set<String>,
     ): List<Pair<LocalDate, Lesson>> {
         val result = mutableListOf<Pair<LocalDate, Lesson>>()
-        val overrides = ru.bgtu.schedule.data.DayOverrides(context)
         var date = now.toLocalDate()
         val end = date.plusDays(21)
         while (!date.isAfter(end)) {
-            if (ru.bgtu.schedule.data.Holidays.on(date) != null) {
-                date = date.plusDays(1)
-                continue
-            }
-            lessonsOn(group, date.dayOfWeek.value, date, semesterStart, "auto")
-                .filter { it.key !in hidden }
-                .mapNotNull { overrides.apply(date, it) }
-                .forEach { lesson ->
+            dayLessons(context, group, semesterStart, date, hidden).forEach { lesson ->
                 val start = parseTime(lesson.start) ?: return@forEach
                 if (LocalDateTime.of(date, start).isAfter(now)) result += date to lesson
             }
@@ -175,7 +190,10 @@ class BootReceiver : BroadcastReceiver() {
         Thread {
             try {
                 LessonAlerts.reschedule(context)
+                DigestAlerts.reschedule(context)
                 DeadlineAlerts.reschedule(context)
+                OngoingLesson.reschedule(context)
+                ChatNotify.schedule(context)
             } finally {
                 pending.finish()
             }

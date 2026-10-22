@@ -50,7 +50,7 @@ export default function GroupPicker({ s, bundle, initialName, selectedId, askNam
           </div>
         </div>
         <h1 className="h1 mt16">{faculty ? faculty.short : s.chooseFaculty}</h1>
-        <div className="muted small">{faculty ? faculty.name : s.facultyThenGroup}</div>
+        <div className="muted small">{faculty ? s.facultyName(faculty.name) : s.facultyThenGroup}</div>
       </div>
 
       <div className="stack tight" style={{ padding: "16px 16px 8px", flex: 1 }}>

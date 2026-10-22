@@ -127,6 +127,7 @@ object ScheduleRepository {
 }
 
 class Prefs(context: Context) {
+    private val app = context.applicationContext
     private val sp = context.getSharedPreferences("bgtu", Context.MODE_PRIVATE)
 
     fun groupId(): String? = sp.getString(KEY_GROUP, null)
@@ -141,10 +142,97 @@ class Prefs(context: Context) {
         sp.edit().putString(KEY_NAME, value.trim()).apply()
     }
 
-    fun darkTheme(): Boolean = sp.getBoolean(KEY_DARK, false)
+    /** The theme in effect: the system one when "follow system" is on, otherwise the saved choice. */
+    fun darkTheme(): Boolean = if (followSystemTheme()) systemDark() else sp.getBoolean(KEY_DARK, false)
 
     fun setDarkTheme(value: Boolean) {
         sp.edit().putBoolean(KEY_DARK, value).apply()
+    }
+
+    fun systemDark(): Boolean =
+        (app.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+    fun followSystemTheme(): Boolean = sp.getBoolean(KEY_THEME_SYSTEM, false)
+
+    fun setFollowSystemTheme(value: Boolean) {
+        sp.edit().putBoolean(KEY_THEME_SYSTEM, value).apply()
+    }
+
+    fun hideProfanity(): Boolean = sp.getBoolean(KEY_PROFANITY, false)
+
+    fun setHideProfanity(value: Boolean) {
+        sp.edit().putBoolean(KEY_PROFANITY, value).apply()
+    }
+
+    fun chatNotify(): Boolean =
+        NotifyProfile.allowsChats(notifyProfile()) && sp.getBoolean(KEY_CHAT_NOTIFY, false)
+
+    fun setChatNotify(value: Boolean) {
+        sp.edit().putBoolean(KEY_CHAT_NOTIFY, value && NotifyProfile.allowsChats(notifyProfile())).apply()
+    }
+
+    fun ongoingLesson(): Boolean =
+        NotifyProfile.allowsOngoing(notifyProfile()) && sp.getBoolean(KEY_ONGOING, false)
+
+    fun setOngoingLesson(value: Boolean) {
+        sp.edit().putBoolean(KEY_ONGOING, value && NotifyProfile.allowsOngoing(notifyProfile())).apply()
+    }
+
+    /** normal | quiet | session | off. Migrates once from the old lesson/chat toggles. */
+    fun notifyProfile(): String {
+        migrateNotifyProfile()
+        return NotifyProfile.clean(sp.getString(KEY_NOTIFY_PROFILE, NotifyProfile.NORMAL))
+    }
+
+    fun setNotifyProfile(value: String) {
+        val profile = NotifyProfile.clean(value)
+        val edit = sp.edit().putString(KEY_NOTIFY_PROFILE, profile)
+        if (!NotifyProfile.allowsLessons(profile)) edit.putBoolean(KEY_NOTIFY, false)
+        else if (!sp.getBoolean(KEY_NOTIFY, false)) edit.putBoolean(KEY_NOTIFY, true)
+        if (!NotifyProfile.allowsChats(profile)) edit.putBoolean(KEY_CHAT_NOTIFY, false)
+        if (!NotifyProfile.allowsOngoing(profile)) edit.putBoolean(KEY_ONGOING, false)
+        if (!NotifyProfile.allowsDigest(profile)) edit.putBoolean(KEY_DIGEST, false)
+        edit.apply()
+    }
+
+    fun digestEnabled(): Boolean =
+        NotifyProfile.allowsDigest(notifyProfile()) && sp.getBoolean(KEY_DIGEST, false)
+
+    fun setDigestEnabled(value: Boolean) {
+        sp.edit().putBoolean(KEY_DIGEST, value && NotifyProfile.allowsDigest(notifyProfile())).apply()
+    }
+
+    /** Local hour 18..23 for the evening digest; default 21. */
+    fun digestHour(): Int = sp.getInt(KEY_DIGEST_HOUR, 21).coerceIn(18, 23)
+
+    fun setDigestHour(hour: Int) {
+        sp.edit().putInt(KEY_DIGEST_HOUR, hour.coerceIn(18, 23)).apply()
+    }
+
+    private fun migrateNotifyProfile() {
+        if (sp.contains(KEY_NOTIFY_PROFILE)) return
+        val lessons = sp.getBoolean(KEY_NOTIFY, false)
+        val chats = sp.getBoolean(KEY_CHAT_NOTIFY, false)
+        val profile = when {
+            !lessons && !chats -> NotifyProfile.OFF
+            !lessons && chats -> NotifyProfile.QUIET
+            else -> NotifyProfile.NORMAL
+        }
+        sp.edit().putString(KEY_NOTIFY_PROFILE, profile).apply()
+    }
+
+    fun seenVersion(): String? = sp.getString(KEY_SEEN_VERSION, null)
+
+    fun setSeenVersion(value: String) {
+        sp.edit().putString(KEY_SEEN_VERSION, value).apply()
+    }
+
+    /** The one-time «Войдите в аккаунт» offer was shown. */
+    fun loginOffered(): Boolean = sp.getBoolean(KEY_LOGIN_OFFERED, false)
+
+    fun setLoginOffered() {
+        sp.edit().putBoolean(KEY_LOGIN_OFFERED, true).apply()
     }
 
     fun clearProfile() {
@@ -152,7 +240,7 @@ class Prefs(context: Context) {
     }
 
     fun wipeUserData() {
-        val keep = setOf(KEY_DARK, KEY_LANG, KEY_ONBOARDED)
+        val keep = setOf(KEY_DARK, KEY_LANG, KEY_ONBOARDED, KEY_THEME_SYSTEM, KEY_SEEN_VERSION)
         val edit = sp.edit()
         sp.all.keys.filterNot { it in keep }.forEach { edit.remove(it) }
         edit.apply()
@@ -186,10 +274,16 @@ class Prefs(context: Context) {
         edit.apply()
     }
 
-    fun notifyEnabled(): Boolean = sp.getBoolean(KEY_NOTIFY, false)
+    /** Lesson reminders are on only in the normal profile (and the stored toggle). */
+    fun notifyEnabled(): Boolean =
+        NotifyProfile.allowsLessons(notifyProfile()) && sp.getBoolean(KEY_NOTIFY, false)
 
     fun setNotifyEnabled(value: Boolean) {
-        sp.edit().putBoolean(KEY_NOTIFY, value).apply()
+        val edit = sp.edit().putBoolean(KEY_NOTIFY, value)
+        if (value && notifyProfile() != NotifyProfile.NORMAL) {
+            edit.putString(KEY_NOTIFY_PROFILE, NotifyProfile.NORMAL)
+        }
+        edit.apply()
     }
 
     fun notifyLead(): Int = sp.getInt(KEY_LEAD, 10)
@@ -232,11 +326,20 @@ class Prefs(context: Context) {
         private const val KEY_DARK = "dark"
         private const val KEY_NOTIFY = "notify"
         private const val KEY_LEAD = "notify_lead"
+        private const val KEY_NOTIFY_PROFILE = "notify_profile"
+        private const val KEY_DIGEST = "digest"
+        private const val KEY_DIGEST_HOUR = "digest_hour"
         private const val KEY_WIDGET_DATE = "widget_date"
         private const val KEY_WIDGET_PICKED_ON = "widget_picked_on"
         private const val KEY_LANG = "lang"
         private const val KEY_ONBOARDED = "onboarded"
         private const val KEY_FRIEND = "friend"
+        private const val KEY_THEME_SYSTEM = "theme_system"
+        private const val KEY_PROFANITY = "hide_profanity"
+        private const val KEY_CHAT_NOTIFY = "chat_notify"
+        private const val KEY_ONGOING = "ongoing_lesson"
+        private const val KEY_SEEN_VERSION = "seen_version"
+        private const val KEY_LOGIN_OFFERED = "login_offered"
 
         private fun noteKey(date: String, lessonKey: String) = "note|$date|$lessonKey"
     }

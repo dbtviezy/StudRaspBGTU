@@ -16,7 +16,7 @@ export function applyThemeAttr(dark: boolean) {
 /** Circular reveal from the tapped point, like the Android theme switch. */
 export function switchTheme(dark: boolean, origin?: { x: number; y: number }) {
   const apply = () => {
-    flushSync(() => setState({ dark }));
+    flushSync(() => setState({ dark, systemTheme: false }));
     applyThemeAttr(dark);
   };
   const doc = document as ViewTransitionDocument;

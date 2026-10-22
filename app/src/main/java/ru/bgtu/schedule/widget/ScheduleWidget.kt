@@ -63,6 +63,7 @@ class ScheduleWidget : android.appwidget.AppWidgetProvider() {
             val ids = manager.getAppWidgetIds(ComponentName(app, ScheduleWidget::class.java))
             ids.forEach { update(app, manager, it) }
             if (ids.isNotEmpty()) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
+            WeekWidget.refresh(app)
         }
 
         private fun scheduleMidnight(context: Context) {

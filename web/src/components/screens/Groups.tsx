@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { Copy } from "@/lib/i18n";
-import { type Faculty, type Group, nextTeacherLessons, searchTeachers } from "@/lib/schedule";
+import { type Faculty, type Group, nextTeacherLessons, searchTeachers, type TeacherCard } from "@/lib/schedule";
 import { type Summary, summaryFor, useSummaries } from "@/lib/ratings";
 import { actions, setState } from "@/lib/store";
 import { useShell } from "../context";
@@ -43,7 +43,7 @@ export function FacultyCard({ faculty, s, onClick }: { faculty: Faculty; s: Copy
         {faculty.short}
       </span>
       <div className="grow">
-        <div className="semibold" style={{ fontSize: 15 }}>{faculty.name}</div>
+        <div className="semibold" style={{ fontSize: 15 }}>{s.facultyName(faculty.name)}</div>
         <div className="muted small mt2">{s.groupsCount(faculty.groups.length)}</div>
       </div>
       <span className="muted">
@@ -101,15 +101,44 @@ function StarToggle({ on, s, onClick }: { on: boolean; s: Copy; onClick: () => v
   );
 }
 
+function TeacherRow({ name, card, summary, favorite, onFavorite }: { name: string; card?: TeacherCard; summary: Summary | undefined; favorite: boolean; onFavorite: () => void }) {
+  const { bundle, s, now, today, openTeacher } = useShell();
+  const next = nextTeacherLessons(bundle, name, today, now, 1)[0];
+  const subjects = card?.subjects ?? [];
+  return (
+    <div className="card row" role="button" tabIndex={0} style={{ cursor: "pointer", alignItems: "flex-start" }} onClick={() => openTeacher(name)}>
+      <div className="grow">
+        <div className="semibold">{name}</div>
+        <div className="mt2">
+          <RatingLine summary={summary} s={s} />
+        </div>
+        {subjects.length > 0 && (
+          <div className="muted small mt2 ellipsis">
+            {subjects.slice(0, 2).join(" · ") + (subjects.length > 2 ? ` +${subjects.length - 2}` : "")}
+          </div>
+        )}
+        {card && <div className="muted xsmall mt2">{s.teacherGroups(card.groups)}</div>}
+        <div className={`xsmall mt4 ${next ? "blue" : "muted"}`}>{next ? teacherFollowLine(s, today, next) : s.noTeacherSoon}</div>
+      </div>
+      <StarToggle on={favorite} s={s} onClick={onFavorite} />
+    </div>
+  );
+}
+
 export default function GroupsScreen() {
-  const { bundle, s, data, now, today, group: current, setTab, openTeacher } = useShell();
+  const { bundle, s, data, group: current, setTab } = useShell();
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"groups" | "teachers">("groups");
   const [opened, setOpened] = useState<string | null>(null);
   const summaries = useSummaries();
   const favorites = [...data.favoriteTeachers].sort();
   const search = query.trim();
-  const teachers = useMemo(() => (mode === "teachers" ? searchTeachers(bundle, query) : []), [bundle, query, mode]);
+  const searching = search.length >= 2;
+  const teachers = useMemo(() => {
+    if (mode !== "teachers") return [];
+    const found = searchTeachers(bundle, searching ? search : "", current);
+    return searching ? found : found.filter((card) => !data.favoriteTeachers.includes(card.name));
+  }, [bundle, search, searching, mode, current, data.favoriteTeachers]);
   const results = useMemo(() => {
     if (!search) return [];
     const q = search.toLowerCase();
@@ -134,7 +163,7 @@ export default function GroupsScreen() {
             </button>
             <div className="grow">
               <h1 className="h1" style={{ fontSize: 24 }}>{faculty.short}</h1>
-              <div className="muted small">{faculty.name}</div>
+              <div className="muted small">{s.facultyName(faculty.name)}</div>
             </div>
           </div>
         ) : (
@@ -162,65 +191,32 @@ export default function GroupsScreen() {
       </div>
 
       {mode === "teachers" ? (
-        search.length < 2 ? (
-          <>
-            {favorites.length > 0 && <h3 className="h3">{s.favoriteTeachers}</h3>}
-            {favorites.map((name) => {
-              const next = nextTeacherLessons(bundle, name, today, now);
-              return (
-                <div key={`fav|${name}`} className="card" role="button" tabIndex={0} style={{ cursor: "pointer" }} onClick={() => openTeacher(name)}>
-                  <div className="row">
-                    <div className="grow">
-                      <div className="semibold">{name}</div>
-                      <div className="mt2">
-                        <RatingLine summary={summaryFor(summaries, name)} s={s} />
-                      </div>
-                    </div>
-                    <StarToggle on s={s} onClick={() => actions.setFavorite(name, false)} />
-                  </div>
-                  {next.length === 0 ? (
-                    <div className="muted small">{s.noTeacherSoon}</div>
-                  ) : (
-                    next.map((item) => (
-                      <div key={`${item.day}${item.groupId}${item.lesson.key}`} className="blue small mt4">
-                        {teacherFollowLine(s, today, item)}
-                      </div>
-                    ))
-                  )}
-                </div>
-              );
-            })}
-            <div className="muted" style={{ padding: 8 }}>{s.teacherHint}</div>
-          </>
-        ) : teachers.length === 0 ? (
-          <div className="muted" style={{ padding: 8 }}>{s.nothingFound}</div>
-        ) : (
-          teachers.map((hit) => {
-            const starred = favorites.includes(hit.teacher.trim());
-            return (
-              <div
-                key={`${hit.teacher}|${hit.groupId}|${hit.lesson.key}`}
-                className="card row"
-                role="button"
-                tabIndex={0}
-                style={{ cursor: "pointer", alignItems: "flex-start" }}
-                onClick={() => hit.teacher.trim() && openTeacher(hit.teacher)}
-              >
-                <div className="grow">
-                  <div className="semibold">{hit.teacher}</div>
-                  {hit.teacher.trim() && (
-                    <div className="mt2">
-                      <RatingLine summary={summaryFor(summaries, hit.teacher)} s={s} />
-                    </div>
-                  )}
-                  <div className="muted small mt2">{`${s.dayName(hit.lesson.dayName)} · ${hit.lesson.start} · ${hit.lesson.subject}`}</div>
-                  <div className="blue xsmall mt2">{`${hit.groupId} · ${hit.facultyShort} · ${hit.lesson.room}`}</div>
-                </div>
-                {hit.teacher.trim() && <StarToggle on={starred} s={s} onClick={() => actions.setFavorite(hit.teacher, !starred)} />}
-              </div>
-            );
-          })
-        )
+        <>
+          {!searching && favorites.length > 0 && (
+            <>
+              <h3 className="h3">{s.favoriteTeachers}</h3>
+              {favorites.map((name) => (
+                <TeacherRow key={`fav|${name}`} name={name} summary={summaryFor(summaries, name)} favorite onFavorite={() => actions.setFavorite(name, false)} />
+              ))}
+            </>
+          )}
+          {searching && teachers.length === 0 && <div className="muted" style={{ padding: 8 }}>{s.nothingFound}</div>}
+          {teachers.some((t) => t.mine) && <h3 className="h3 mt4">{s.myTeachers}</h3>}
+          {!searching && teachers.length === 0 && favorites.length === 0 && <div className="muted small" style={{ padding: "0 8px" }}>{s.myTeachersEmpty}</div>}
+          {teachers.map((card, index) => (
+            <Fragment key={card.name}>
+              {!card.mine && (index === 0 || teachers[index - 1].mine) && <h3 className="h3 mt4">{s.otherTeachers}</h3>}
+              <TeacherRow
+                name={card.name}
+                card={card}
+                summary={summaries.get(card.name)}
+                favorite={favorites.includes(card.name)}
+                onFavorite={() => actions.setFavorite(card.name, !favorites.includes(card.name))}
+              />
+            </Fragment>
+          ))}
+          {!searching && <div className="muted" style={{ padding: 8 }}>{s.teacherSearchHint}</div>}
+        </>
       ) : search ? (
         <>
           {results.map(({ faculty: f, group }) => (

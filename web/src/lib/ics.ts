@@ -18,14 +18,49 @@ function hash(text: string): string {
   return h.toString(36);
 }
 
-/** Builds an .ics for Mon–Sat of the week containing `anchor`; times are floating local time. */
-export function weekIcs(group: Group, semesterStart: ISODate, anchor: ISODate, f: Filters, lessonWord: string): { text: string; count: number } {
-  const monday = mondayOf(anchor);
+const MOSCOW = [
+  "BEGIN:VTIMEZONE",
+  "TZID:Europe/Moscow",
+  "BEGIN:STANDARD",
+  "DTSTART:19700101T000000",
+  "TZOFFSETFROM:+0300",
+  "TZOFFSETTO:+0300",
+  "TZNAME:MSK",
+  "END:STANDARD",
+  "END:VTIMEZONE",
+];
+
+interface IcsOptions {
+  /** Calendar name and refresh hints for subscriptions; times are then pinned to Moscow. */
+  subscription?: { name: string };
+}
+
+/** Builds an .ics for `days` days starting at `from`. */
+export function rangeIcs(
+  group: Group,
+  semesterStart: ISODate,
+  from: ISODate,
+  days: number,
+  f: Filters,
+  lessonWord: string,
+  options: IcsOptions = {},
+): { text: string; count: number } {
   const now = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//StudRaspBGTU//RU", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"];
+  const sub = options.subscription;
+  if (sub) {
+    lines.push(
+      fold(`X-WR-CALNAME:${escape(sub.name)}`),
+      "X-WR-TIMEZONE:Europe/Moscow",
+      "REFRESH-INTERVAL;VALUE=DURATION:PT12H",
+      "X-PUBLISHED-TTL:PT12H",
+      ...MOSCOW,
+    );
+  }
+  const zone = sub ? ";TZID=Europe/Moscow" : "";
   let count = 0;
-  for (let offset = 0; offset <= 5; offset++) {
-    const date = addDays(monday, offset);
+  for (let offset = 0; offset < days; offset++) {
+    const date = addDays(from, offset);
     for (const lesson of shownLessons(group, date, semesterStart, "auto", f)) {
       const start = toMinutes(lesson.start);
       if (start == null) continue;
@@ -35,8 +70,8 @@ export function weekIcs(group: Group, semesterStart: ISODate, anchor: ISODate, f
         "BEGIN:VEVENT",
         `UID:${date}-${hash(lesson.key)}@studrasp-bgtu`,
         `DTSTAMP:${now}`,
-        `DTSTART:${stamp(date, start)}`,
-        `DTEND:${stamp(date, end)}`,
+        `DTSTART${zone}:${stamp(date, start)}`,
+        `DTEND${zone}:${stamp(date, end)}`,
         fold(`SUMMARY:${escape(lesson.subject || lessonWord)}`),
         ...(lesson.room ? [fold(`LOCATION:${escape(lesson.room)}`)] : []),
         fold(`DESCRIPTION:${escape(description)}`),
@@ -47,4 +82,14 @@ export function weekIcs(group: Group, semesterStart: ISODate, anchor: ISODate, f
   }
   lines.push("END:VCALENDAR");
   return { text: lines.join("\r\n") + "\r\n", count };
+}
+
+/** Builds an .ics for Mon–Sat of the week containing `anchor`; times are floating local time. */
+export function weekIcs(group: Group, semesterStart: ISODate, anchor: ISODate, f: Filters, lessonWord: string): { text: string; count: number } {
+  return rangeIcs(group, semesterStart, mondayOf(anchor), 6, f, lessonWord);
+}
+
+/** Public address of the self-updating calendar for a group. */
+export function subscriptionUrl(origin: string, groupId: string): string {
+  return `${origin}/api/ics/${encodeURIComponent(groupId)}.ics`;
 }

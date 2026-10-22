@@ -174,27 +174,29 @@ fun OnboardingScreen(
                 )
             }
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ChoiceChip(
-                s.langRu,
-                (lang ?: "ru") != "en",
-                Modifier.weight(1f),
-            ) { onLanguage("ru") }
-            ChoiceChip(
-                s.langEn,
-                lang == "en",
-                Modifier.weight(1f),
-            ) { onLanguage("en") }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ChoiceChip(s.themeLight, !dark, Modifier.weight(1f)) { onDark(false, it) }
-            ChoiceChip(s.themeDark, dark, Modifier.weight(1f)) { onDark(true, it) }
+        if (pager.currentPage == 0) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ChoiceChip(
+                    s.langRu,
+                    (lang ?: "ru") != "en",
+                    Modifier.weight(1f),
+                ) { onLanguage("ru") }
+                ChoiceChip(
+                    s.langEn,
+                    lang == "en",
+                    Modifier.weight(1f),
+                ) { onLanguage("en") }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ChoiceChip(s.themeLight, !dark, Modifier.weight(1f)) { onDark(false, it) }
+                ChoiceChip(s.themeDark, dark, Modifier.weight(1f)) { onDark(true, it) }
+            }
         }
         Button(
             onClick = {
@@ -218,7 +220,7 @@ fun OnboardingScreen(
             )
         }
         Text(
-            AppVersion.LABEL,
+            "${s.brand} ${AppVersion.LABEL}",
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             color = Muted,
             fontSize = 12.sp,

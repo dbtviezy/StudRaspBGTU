@@ -27,6 +27,15 @@ export function exportBackup(fileNames: string[]): string {
       remind: t.remind,
     })),
     files: fileNames,
+    settings: {
+      notifyProfile: d.notifyProfile,
+      digest: d.digestOn,
+      digestHour: d.digestHour,
+      hideProfanity: d.hideProfanity,
+      systemTheme: d.systemTheme,
+      dark: d.dark,
+      lang: d.lang ?? "",
+    },
   };
   return JSON.stringify(root, null, 2);
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAccount } from "@/lib/account";
+import { cachedChats, cachedGroupTasks, refreshGroupTasks, useChatVersion } from "@/lib/chat";
 import type { Copy } from "@/lib/i18n";
 import type { Lesson } from "@/lib/schedule";
 import { actions, isOverdue, newId, sortedTodos, type TodoItem } from "@/lib/store";
@@ -8,6 +10,7 @@ import { type TodoPreset, useShell } from "../context";
 import { Icon } from "../Icons";
 import { Dialog, Overlay, OverlayHeader } from "../ui";
 import { deadlineText } from "../screens/Home";
+import { GroupTaskRow } from "./ChatTools";
 
 export const lessonLabelOf = (s: Copy, lesson: Lesson) => [s.dayName(lesson.dayName), lesson.start, lesson.subject].filter(Boolean).join(" · ");
 
@@ -27,10 +30,19 @@ function TaskRow({ item }: { item: TodoItem }) {
 }
 
 export default function TasksOverlay({ onClose }: { onClose: () => void }) {
-  const { s, data, editTodo } = useShell();
+  const { s, data, editTodo, today } = useShell();
+  const { user } = useAccount();
+  useChatVersion();
   const all = sortedTodos(data.todos);
   const open = all.filter((t) => !t.done);
   const done = all.filter((t) => t.done);
+  const chats = user ? cachedChats() : [];
+  const group = user ? cachedGroupTasks().filter((t) => !t.dueDate || t.dueDate >= today) : [];
+
+  useEffect(() => {
+    if (user) refreshGroupTasks().catch(() => undefined);
+  }, [user]);
+
   return (
     <Overlay onClose={onClose}>
       <OverlayHeader title={s.allTasks} onClose={onClose} closeLabel={s.close} />
@@ -45,6 +57,10 @@ export default function TasksOverlay({ onClose }: { onClose: () => void }) {
       <div className="stack tight mt8">
         {done.map((item) => <TaskRow key={item.id} item={item} />)}
       </div>
+      {group.length > 0 && <h3 className="h3 mt16">{s.groupTasks}</h3>}
+      {group.map((task) => (
+        <GroupTaskRow key={task.id} task={task} chatTitle={chats.find((c) => c.id === task.chatId)?.title} />
+      ))}
     </Overlay>
   );
 }
@@ -71,7 +87,7 @@ export function LessonChooser({ onPick, onClose }: { onPick: (lesson: Lesson) =>
         {shown.map((lesson) => (
           <button key={lesson.key} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 4px", borderBottom: "1px solid var(--line)" }} onClick={() => onPick(lesson)}>
             <div className="small">{lessonLabelOf(s, lesson)}</div>
-            <div className="muted xsmall">{[s.lessonType(lesson.type), lesson.room, s.weekBadge(lesson.week)].filter(Boolean).join(" · ")}</div>
+            <div className="muted xsmall">{[s.lessonType(lesson.type), s.roomName(lesson.room), s.weekBadge(lesson.week)].filter(Boolean).join(" · ")}</div>
           </button>
         ))}
         {shown.length === 0 && <div className="muted small" style={{ padding: 8 }}>{s.nothingFound}</div>}

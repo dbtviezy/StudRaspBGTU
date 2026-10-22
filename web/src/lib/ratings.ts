@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getAccount } from "./account";
 import { splitTeachers } from "./schedule";
 import { newId, PREFIX } from "./store";
 
@@ -14,6 +15,11 @@ export interface Summary {
 }
 
 export interface Review {
+  id: number;
+  likes: number;
+  dislikes: number;
+  /** 1, -1 or 0 — this device's vote; absent on the device's own review. */
+  myVote?: number;
   overall: number;
   delivery: number;
   strictness: number;
@@ -25,7 +31,9 @@ export interface Review {
 export interface TeacherRatings {
   summary: Summary | null;
   reviews: Review[];
-  mine: Review | null;
+  /** `claimable`: left from this device without an account; `hidden`: hidden for that reason or by a moderator. */
+  mine: (Review & { claimable?: boolean; hidden?: boolean }) | null;
+  legacyUntil?: string | null;
 }
 
 export function summaryFor(summaries: Map<string, Summary>, rawTeacher: string): Summary | undefined {
@@ -35,7 +43,7 @@ export function summaryFor(summaries: Map<string, Summary>, rawTeacher: string):
 }
 
 export class RatingError extends Error {
-  constructor(public code: string) {
+  constructor(public code: string, public extra: Record<string, unknown> = {}) {
     super(code);
   }
 }
@@ -52,16 +60,37 @@ export function deviceId(): string {
   return id;
 }
 
-async function call<T>(input: string, init?: RequestInit): Promise<T> {
+async function call<T>(input: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  const token = getAccount().token;
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   let response: Response;
   try {
-    response = await fetch(input, init);
+    response = await fetch(input, { ...init, headers });
   } catch {
     throw new RatingError("offline");
   }
   const body = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!response.ok || !body) throw new RatingError(body?.error ?? "server_error");
+  if (!response.ok || !body) {
+    const { error, ...extra } = (body ?? {}) as Record<string, unknown>;
+    throw new RatingError(typeof error === "string" ? error : "server_error", extra);
+  }
   return body;
+}
+
+/** Old reviews left from this device without an account, and when they get hidden. */
+export async function claimableReviews(): Promise<{ count: number; until: string | null }> {
+  return call("/api/ratings/claim", { headers: { "X-Device-Id": deviceId() }, cache: "no-store" });
+}
+
+/** Moves this device's old reviews, votes and reports to the signed-in account. */
+export async function claimDeviceReviews(): Promise<number> {
+  const body = await call<{ claimed: number }>("/api/ratings/claim", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: deviceId() }),
+  });
+  return body.claimed;
 }
 
 let summaries: Map<string, Summary> | null = null;
@@ -135,6 +164,22 @@ export async function saveReview(teacher: string, scores: Scores, text: string):
   });
   updateSummary(teacher.trim(), body.summary);
   return body.summary;
+}
+
+export async function voteReview(reviewId: number, value: number): Promise<{ likes: number; dislikes: number; myVote: number }> {
+  return call("/api/ratings/vote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: deviceId(), reviewId, value }),
+  });
+}
+
+export async function reportReview(reviewId: number, reason: string): Promise<void> {
+  await call("/api/reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: deviceId(), kind: "review", target: reviewId, reason }),
+  });
 }
 
 export async function deleteReview(teacher: string): Promise<Summary | null> {

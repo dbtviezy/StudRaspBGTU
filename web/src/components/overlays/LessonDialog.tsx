@@ -68,7 +68,7 @@ export default function LessonDialog({ lesson: opened, date, onClose }: { lesson
         <Detail label={s.time} value={[lesson.start, lesson.end].filter(Boolean).join("–") || "—"} />
         {pair != null && <Detail label={s.pair} value={s.pairLabel(pair)} />}
         {lesson.type && <Detail label={s.type} value={s.lessonType(lesson.type)} />}
-        {lesson.room && <Detail label={s.room} value={lesson.room} />}
+        {lesson.room && <Detail label={s.room} value={s.roomName(lesson.room)} />}
         {teacher && (
           <div className="detail">
             <div className="label">{s.teacher}</div>

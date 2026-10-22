@@ -55,6 +55,18 @@ object Backup {
         }
         root.put("todos", todos)
         root.put("files", JSONArray(listLibrary(context).map { it.file.name }))
+        root.put(
+            "settings",
+            JSONObject()
+                .put("notifyProfile", prefs.notifyProfile())
+                .put("notifyLead", prefs.notifyLead())
+                .put("digest", prefs.digestEnabled())
+                .put("digestHour", prefs.digestHour())
+                .put("hideProfanity", prefs.hideProfanity())
+                .put("systemTheme", prefs.followSystemTheme())
+                .put("dark", prefs.darkTheme())
+                .put("lang", prefs.language() ?: ""),
+        )
         return root.toString(2)
     }
 

@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 
 data class Holiday(val nameRu: String, val nameEn: String)
 
@@ -34,6 +35,10 @@ class HiddenStore(context: Context) {
         val next = keys().toMutableSet()
         if (hidden) next += key else next -= key
         sp.edit().putStringSet(KEY, next).apply()
+    }
+
+    fun replaceAll(keys: Collection<String>) {
+        sp.edit().putStringSet(KEY, keys.filter { it.isNotBlank() }.toSet()).apply()
     }
 
     companion object {
@@ -135,23 +140,47 @@ fun splitTeachers(raw: String): List<String> {
     return found.ifEmpty { listOfNotNull(raw.trim().ifBlank { null }) }
 }
 
-data class TeacherHit(
-    val teacher: String,
-    val groupId: String,
-    val facultyShort: String,
-    val lesson: Lesson,
-)
+/** One person from the schedule; a lesson with two teachers counts for each of them. */
+data class TeacherCard(val name: String, val subjects: List<String>, val groups: Int, val mine: Boolean)
 
-fun searchTeachers(bundle: ScheduleBundle, query: String): List<TeacherHit> {
-    val text = query.trim()
-    if (text.length < 2) return emptyList()
-    return bundle.groups.flatMap { (faculty, group) ->
-        group.lessons.filter { it.teacher.contains(text, true) }.map { lesson ->
-            TeacherHit(lesson.teacher, group.id, faculty.short, lesson)
+private class TeacherEntry(val subjects: MutableSet<String> = sortedSetOf(), val groups: MutableSet<String> = mutableSetOf())
+
+private val directories = java.util.WeakHashMap<ScheduleBundle, Map<String, TeacherEntry>>()
+
+private fun teacherDirectory(bundle: ScheduleBundle): Map<String, TeacherEntry> = synchronized(directories) {
+    directories.getOrPut(bundle) {
+        val directory = mutableMapOf<String, TeacherEntry>()
+        bundle.groups.forEach { (_, group) ->
+            group.lessons.forEach { lesson ->
+                splitTeachers(lesson.teacher).forEach { name ->
+                    val entry = directory.getOrPut(name) { TeacherEntry() }
+                    if (lesson.subject.isNotBlank()) entry.subjects += lesson.subject
+                    entry.groups += group.id
+                }
+            }
         }
-    }.distinctBy { "${it.teacher}|${it.groupId}|${it.lesson.key}" }
-        .sortedWith(compareBy({ it.teacher }, { it.lesson.day }, { it.lesson.start }, { it.groupId }))
-        .take(60)
+        directory
+    }
+}
+
+private val RU_COLLATOR: java.text.Collator = java.text.Collator.getInstance(java.util.Locale("ru"))
+
+/** Teachers of [mine] first, then everyone else, each list alphabetical. An empty query lists only [mine]. */
+fun searchTeachers(bundle: ScheduleBundle, query: String, mine: Group?): List<TeacherCard> {
+    val text = query.trim().lowercase()
+    val own = mine?.lessons?.flatMap { splitTeachers(it.teacher) }?.toSet().orEmpty()
+    return teacherDirectory(bundle).mapNotNull { (name, entry) ->
+        val isMine = name in own
+        val keep = if (text.isNotEmpty()) name.lowercase().contains(text) else isMine
+        if (keep) TeacherCard(name, entry.subjects.toList(), entry.groups.size, isMine) else null
+    }.sortedWith(compareBy<TeacherCard> { !it.mine }.thenComparator { a, b -> RU_COLLATOR.compare(a.name, b.name) })
+        .take(80)
+}
+
+private fun teachesLesson(people: List<String>, raw: String, lesson: Lesson): Boolean {
+    if (lesson.teacher.trim().equals(raw, true)) return true
+    val names = splitTeachers(lesson.teacher)
+    return people.any { it in names }
 }
 
 class FavoriteTeachers(context: Context) {
@@ -192,8 +221,9 @@ fun nextTeacherLessons(
 ): List<TeacherNext> {
     val name = teacher.trim()
     if (name.isBlank()) return emptyList()
+    val people = splitTeachers(teacher)
     val hits = bundle.groups.flatMap { (faculty, group) ->
-        group.lessons.filter { it.teacher.trim().equals(name, true) }.map { Triple(faculty.short, group, it) }
+        group.lessons.filter { teachesLesson(people, name, it) }.map { Triple(faculty.short, group, it) }
     }
     if (hits.isEmpty()) return emptyList()
     val result = mutableListOf<TeacherNext>()
@@ -213,6 +243,37 @@ fun nextTeacherLessons(
             }
     }
     return result
+}
+
+/** The teacher's current class, or the next one if they are free; [groups] lists every group sitting in it. */
+data class TeacherWhere(
+    val inClass: Boolean,
+    val day: LocalDate,
+    val lesson: Lesson,
+    val groups: List<String>,
+    /** Minutes left in the class, or until it starts today; -1 for a later day. */
+    val minutes: Int,
+)
+
+fun teacherWhere(
+    bundle: ScheduleBundle,
+    teacher: String,
+    today: LocalDate,
+    now: LocalTime,
+    semesterStart: LocalDate,
+): TeacherWhere? {
+    val items = nextTeacherLessons(bundle, teacher, today, now, semesterStart, limit = 30)
+    val first = items.firstOrNull() ?: return null
+    val groups = items.filter { it.day == first.day && it.lesson.start == first.lesson.start }.map { it.groupId }.distinct()
+    val start = parseTime(first.lesson.start)
+    val end = parseTime(first.lesson.end)
+    val inClass = first.day == today && start != null && end != null && !now.isBefore(start) && now.isBefore(end)
+    val minutes = when {
+        inClass -> ChronoUnit.MINUTES.between(now, end).toInt().coerceAtLeast(1)
+        first.day == today && start != null -> ChronoUnit.MINUTES.between(now, start).toInt().coerceAtLeast(0)
+        else -> -1
+    }
+    return TeacherWhere(inClass, first.day, first.lesson, groups, minutes)
 }
 
 sealed class LiveStatus {
