@@ -8,8 +8,12 @@ captures/
 .cxx/
 app/build/
 dist/
+RELEASE-1.2.checklist.local.md
+*.checklist.local.md
+*.post.local.md
 .cursor/
 /AGENTS.md
+.impeccable/
 
 node_modules/
 .next/
